@@ -23,6 +23,23 @@ import (
 
 type Status string
 
+// Step is a stage of processing one video, reported through Runner.OnStep.
+type Step string
+
+const (
+	StepHash     Step = "hash"     // reading the file
+	StepNapi     Step = "napi"     // asking NapiProjekt
+	StepOS       Step = "os"       // searching OpenSubtitles
+	StepDownload Step = "download" // downloading a candidate
+	StepSync     Step = "sync"     // aligning to the audio
+)
+
+func (r *Runner) step(video string, s Step) {
+	if r.OnStep != nil {
+		r.OnStep(video, s)
+	}
+}
+
 // Source says where downloaded subtitles came from.
 type Source string
 
@@ -159,6 +176,9 @@ type Runner struct {
 	// Progress is called after each video, from worker goroutines but never
 	// concurrently.
 	Progress func(done, total int, r Result)
+	// OnStep reports what is being done for a video; it may be called
+	// concurrently from several workers.
+	OnStep func(video string, step Step)
 
 	mu      sync.Mutex
 	lastReq time.Time
@@ -229,6 +249,7 @@ func (r *Runner) process(ctx context.Context, video string) Result {
 			return res
 		}
 	}
+	r.step(video, StepHash)
 	hash, err := napi.FileHash(video)
 	if err != nil {
 		res.Status, res.Err = Failed, err
@@ -237,6 +258,7 @@ func (r *Runner) process(ctx context.Context, video string) Result {
 	var osHits []osdb.Subtitle
 	osSearched := false
 	for _, lang := range r.Config.Languages {
+		r.step(video, StepNapi)
 		sub, err := r.download(ctx, hash, lang)
 		if err == nil {
 			res.Lang, res.Source = sub.Lang, FromNapi
@@ -251,12 +273,14 @@ func (r *Runner) process(ctx context.Context, video string) Result {
 		}
 		if !osSearched {
 			osSearched = true
+			r.step(video, StepOS)
 			osHits = r.osSearchHash(ctx, video, &res)
 		}
 		for _, s := range osdb.Rank(osHits, filepath.Base(video), 0, []string{osLang(lang)}) {
 			if !s.MovieHashMatch {
 				continue
 			}
+			r.step(video, StepDownload)
 			content, err := r.osDownload(ctx, s, &res)
 			if err != nil {
 				break
@@ -377,6 +401,7 @@ func (r *Runner) osDownload(ctx context.Context, s osdb.Subtitle, res *Result) (
 // similar finds subtitles made for another release of the same movie (or
 // episode) on OpenSubtitles and syncs the best candidate to the video's audio.
 func (r *Runner) similar(ctx context.Context, video, hash string, hashHits []osdb.Subtitle, res *Result) (Result, bool) {
+	r.step(video, StepOS)
 	q, ok := r.similarQuery(ctx, video, hash, hashHits, res)
 	if !ok {
 		return Result{}, false
@@ -394,6 +419,7 @@ func (r *Runner) similar(ctx context.Context, video, hash string, hashHits []osd
 	// Each download counts against the daily limit; three candidates cover
 	// a wrong length or a failed sync without burning through it.
 	for _, s := range ranked[:min(3, len(ranked))] {
+		r.step(video, StepDownload)
 		content, err := r.osDownload(ctx, s, res)
 		if err != nil {
 			return Result{}, false
@@ -466,6 +492,7 @@ func (r *Runner) syncContent(ctx context.Context, video string, content []byte, 
 	if err != nil {
 		return fmt.Errorf("%w: %v", errNoSyncer, err)
 	}
+	r.step(video, StepSync)
 	synced, err := r.runSync(ctx, syncer, video, subs.WriteSRT(cues))
 	if err != nil {
 		return fmt.Errorf("sync failed: %w", err)

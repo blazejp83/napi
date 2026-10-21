@@ -358,3 +358,30 @@ func (c *Client) Download(ctx context.Context, fileID int) ([]byte, error) {
 	}
 	return io.ReadAll(io.LimitReader(r.Body, 16<<20))
 }
+
+// UserInfo logs in and reports the account's download allowance.
+type UserInfo struct {
+	Level              string
+	AllowedDownloads   int
+	RemainingDownloads int
+}
+
+func (c *Client) UserInfo(ctx context.Context) (*UserInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.login(ctx); err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Data struct {
+			Level              string `json:"level"`
+			AllowedDownloads   num    `json:"allowed_downloads"`
+			RemainingDownloads num    `json:"remaining_downloads"`
+		} `json:"data"`
+	}
+	if err := c.do(ctx, http.MethodGet, c.apiBase()+"/infos/user", nil, true, &resp); err != nil {
+		return nil, err
+	}
+	return &UserInfo{Level: resp.Data.Level, AllowedDownloads: int(resp.Data.AllowedDownloads),
+		RemainingDownloads: int(resp.Data.RemainingDownloads)}, nil
+}

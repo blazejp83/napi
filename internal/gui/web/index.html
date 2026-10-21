@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NapiProjekt</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-logo" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="3" fill="currentColor" opacity=".18"/><rect x="2.5" y="4" width="19" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M6.5 14.5h4M12.5 14.5h5M6.5 11h7M15.5 11h2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+  <symbol id="i-close" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4.9a7.7 7.7 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.4A7.7 7.7 0 0 0 7 6.4l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-.9a7.7 7.7 0 0 0 2.6 1.5l.4 2.4h4l.4-2.4a7.7 7.7 0 0 0 2.6-1.5l2.4.9 2-3.4-2-1.6Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M6 10.3l2.6 2.6L14.2 7" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M10 5.5v5.5" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/><circle cx="10" cy="14.2" r="1.1" fill="#fff"/></symbol>
+  <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><circle cx="10" cy="6" r="1.1" fill="#fff"/><path d="M10 9v5.5" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  <symbol id="i-err" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M7 7l6 6M13 7l-6 6" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></symbol>
+</svg>
+
+<!-- Corner card -->
+<main id="panel" class="panel" hidden>
+  <header class="bar" style="--wails-draggable:drag">
+    <span class="brand"><svg><use href="#i-logo"/></svg>NapiProjekt</span>
+    <span class="tools">
+      <button class="icon" id="p-settings" title="Ustawienia"><svg><use href="#i-gear"/></svg></button>
+      <button class="icon" id="p-close" title="Zamknij"><svg><use href="#i-close"/></svg></button>
+    </span>
+  </header>
+  <section class="body">
+    <svg class="status" id="p-icon" hidden><use href="#i-ok"/></svg>
+    <div class="text">
+      <div class="title" id="p-title">Przygotowuję…</div>
+      <div class="detail" id="p-detail"></div>
+    </div>
+  </section>
+  <div class="progress" id="p-progress"><i></i></div>
+  <footer class="actions">
+    <span class="count" id="p-count"></span>
+    <span class="buttons" id="p-buttons"></span>
+  </footer>
+  <ul class="results" id="p-results" hidden></ul>
+  <div class="countdown" id="p-countdown" hidden><i></i></div>
+</main>
+
+<!-- Settings window -->
+<main id="settings" class="settings" hidden>
+  <h1><svg><use href="#i-logo"/></svg>Ustawienia</h1>
+  <div class="scroll">
+
+  <section class="card">
+    <h2>Napisy</h2>
+    <label class="row"><span>Języki<small>Kolejność, w jakiej szukam napisów</small></span>
+      <select id="s-langs">
+        <option value="PL">Polski</option>
+        <option value="PL,ENG">Polski, potem angielski</option>
+        <option value="ENG">Angielski</option>
+        <option value="ENG,PL">Angielski, potem polski</option>
+      </select></label>
+    <label class="row"><span>Format<small>SRT działa w każdym odtwarzaczu</small></span>
+      <select id="s-format"><option value="srt">Zawsze SRT</option><option value="original">Jak na serwerze</option></select></label>
+    <label class="row"><span>Kodowanie znaków<small>CP1250 tylko dla starych telewizorów</small></span>
+      <select id="s-encoding"><option value="utf8bom">UTF-8 (z BOM)</option><option value="utf8">UTF-8</option><option value="cp1250">Windows-1250</option></select></label>
+    <label class="row"><span>Kod języka w nazwie<small>Film.pl.srt zamiast Film.srt</small></span><input type="checkbox" class="switch" id="s-suffix"></label>
+    <label class="row"><span>Nadpisuj istniejące napisy<small>Inaczej pomijam filmy, które już je mają</small></span><input type="checkbox" class="switch" id="s-overwrite"></label>
+    <label class="row"><span>Przeszukuj podfoldery</span><input type="checkbox" class="switch" id="s-recursive"></label>
+  </section>
+
+  <section class="card">
+    <h2>OpenSubtitles</h2>
+    <p class="hint">Używane, gdy NapiProjekt nie ma napisów. Klucz API utworzysz na <a href="#" data-url="https://www.opensubtitles.com/consumers">opensubtitles.com/consumers</a>.</p>
+    <label class="row"><span>Napisy do innych wersji<small>Pobierz najbliższą wersję i zsynchronizuj z dźwiękiem</small></span><input type="checkbox" class="switch" id="s-sync"></label>
+    <label class="field"><span>Klucz API</span><input id="s-apikey" type="password" autocomplete="off" spellcheck="false"></label>
+    <div class="pair">
+      <label class="field"><span>Login</span><input id="s-user" autocomplete="off" spellcheck="false"></label>
+      <label class="field"><span>Hasło</span><input id="s-pass" type="password" autocomplete="off"></label>
+    </div>
+    <div class="test"><button id="s-test">Sprawdź połączenie</button><span id="s-test-msg" class="msg"></span></div>
+  </section>
+
+  <section class="card">
+    <h2>Windows</h2>
+    <label class="row"><span>Menu Eksploratora i linki napiprojekt:<small>„Pobierz napisy” w menu plików i folderów; kliknięte na napiprojekt.pl napisy dopasowuję automatycznie</small></span><input type="checkbox" class="switch" id="s-menu"></label>
+  </section>
+
+  <details class="card">
+    <summary>Zaawansowane</summary>
+    <label class="row"><span>Równoległe pobieranie<small>Liczba filmów naraz</small></span><input type="number" id="s-jobs" min="1" max="16"></label>
+    <label class="row"><span>Domyślny FPS<small>Gdy nie da się odczytać z pliku</small></span><input type="number" id="s-fps" step="0.001" min="10" max="120"></label>
+    <label class="row"><span>Nazwa klienta NapiProjekt</span><input id="s-client" spellcheck="false"></label>
+  </details>
+  </div>
+
+  <footer class="settings-footer">
+    <span class="meta"><a href="#" id="s-folder">Folder ustawień</a> · <span id="s-version"></span></span>
+    <span class="msg" id="s-msg"></span>
+    <button id="s-cancel">Zamknij</button>
+    <button id="s-save" class="primary">Zapisz</button>
+  </footer>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

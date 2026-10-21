@@ -59,7 +59,7 @@ func rootCmd() *cobra.Command {
 		},
 	}
 	root.Flags().AddFlagSet(get.Flags())
-	root.AddCommand(get, hashCmd(), fetchCmd(), syncCmd(), searchCmd(), configCmd(), menuCmd())
+	root.AddCommand(get, hashCmd(), fetchCmd(), syncCmd(), searchCmd(), accountCmd(), configCmd(), menuCmd())
 	return root
 }
 

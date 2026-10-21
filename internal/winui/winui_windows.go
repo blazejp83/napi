@@ -189,77 +189,12 @@ func (l *Lock) TryLock() bool {
 
 func (l *Lock) Unlock() { windows.ReleaseMutex(l.h) }
 
-// OpenURL opens a web page in the default browser.
-func OpenURL(u string) error {
-	verb, _ := windows.UTF16PtrFromString("open")
-	target, err := windows.UTF16PtrFromString(u)
+// MenuInstalled reports whether the Explorer menu verb is registered.
+func MenuInstalled() bool {
+	k, err := registry.OpenKey(registry.CURRENT_USER, classes+`\Directory\shell\`+verbKey, registry.QUERY_VALUE)
 	if err != nil {
-		return err
+		return false
 	}
-	return windows.ShellExecute(0, verb, target, nil, nil, windows.SW_SHOWNORMAL)
-}
-
-var procGetOpenFileName = windows.NewLazySystemDLL("comdlg32.dll").NewProc("GetOpenFileNameW")
-
-type openFileName struct {
-	structSize    uint32
-	owner         uintptr
-	instance      uintptr
-	filter        *uint16
-	customFilter  *uint16
-	maxCustFilter uint32
-	filterIndex   uint32
-	file          *uint16
-	maxFile       uint32
-	fileTitle     *uint16
-	maxFileTitle  uint32
-	initialDir    *uint16
-	title         *uint16
-	flags         uint32
-	fileOffset    uint16
-	fileExtension uint16
-	defExt        *uint16
-	custData      uintptr
-	hook          uintptr
-	templateName  *uint16
-	reserved      uintptr
-	reservedDW    uint32
-	flagsEx       uint32
-}
-
-// ChooseVideo shows the standard Open dialog for one video file and returns
-// its path, or "" when cancelled.
-func ChooseVideo(title, initialDir string, exts []string) string {
-	var patterns []string
-	for _, e := range exts {
-		patterns = append(patterns, "*."+strings.TrimPrefix(e, "."))
-	}
-	filter := "Filmy\x00" + strings.Join(patterns, ";") + "\x00Wszystkie pliki\x00*.*\x00\x00"
-	f16 := utf16Raw(filter)
-	buf := make([]uint16, 32768)
-	t, _ := windows.UTF16PtrFromString(title)
-	ofn := openFileName{
-		filter:  &f16[0],
-		file:    &buf[0],
-		maxFile: uint32(len(buf)),
-		title:   t,
-		flags:   0x1000 | 0x800 | 0x80000 | 0x8, // FILEMUSTEXIST | PATHMUSTEXIST | EXPLORER | NOCHANGEDIR
-	}
-	ofn.structSize = uint32(unsafe.Sizeof(ofn))
-	if initialDir != "" {
-		ofn.initialDir, _ = windows.UTF16PtrFromString(initialDir)
-	}
-	if r, _, _ := procGetOpenFileName.Call(uintptr(unsafe.Pointer(&ofn))); r == 0 {
-		return ""
-	}
-	return windows.UTF16ToString(buf)
-}
-
-// utf16Raw encodes s keeping embedded NULs, as dialog filters need.
-func utf16Raw(s string) []uint16 {
-	var out []uint16
-	for _, r := range s {
-		out = append(out, uint16(r))
-	}
-	return out
+	k.Close()
+	return true
 }

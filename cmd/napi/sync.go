@@ -13,6 +13,7 @@ import (
 	"github.com/blaze/napi/internal/batch"
 	"github.com/blaze/napi/internal/config"
 	"github.com/blaze/napi/internal/media"
+	"github.com/blaze/napi/internal/osdb"
 )
 
 func syncCmd() *cobra.Command {
@@ -121,6 +122,29 @@ func searchCmd() *cobra.Command {
 				}
 				fmt.Printf("%2d. %s %6.3f fps %6d dl  %s%s\n", i+1, s.Language, s.FPS, s.DownloadCount, s.Release, flags)
 			}
+			return nil
+		},
+	}
+}
+
+func accountCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "account",
+		Short: "Check the OpenSubtitles login and today's remaining downloads",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, _, err := config.Load()
+			if err != nil {
+				return err
+			}
+			o := cfg.OpenSubtitles
+			if o.APIKey == "" {
+				return errors.New("set openSubtitles.apiKey in napi.json (see \"napi config\")")
+			}
+			info, err := osdb.NewClient(o.APIKey, o.Username, o.Password, o.UserAgent).UserInfo(cmd.Context())
+			if err != nil {
+				return err
+			}
+			fmt.Printf("OpenSubtitles: %s, %s, %d of %d downloads left today\n", o.Username, info.Level, info.RemainingDownloads, info.AllowedDownloads)
 			return nil
 		},
 	}

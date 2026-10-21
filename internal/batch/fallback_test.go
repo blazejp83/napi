@@ -2,6 +2,7 @@ package batch
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -232,4 +233,49 @@ func (c *countingMovies) MovieInfo(ctx context.Context, hash string) (*napi.Movi
 	c.calls[hash]++
 	c.mu.Unlock()
 	return c.m.MovieInfo(ctx, hash)
+}
+
+// blockingSyncer waits until the run is cancelled.
+type blockingSyncer struct{ started chan struct{} }
+
+func (b *blockingSyncer) Sync(ctx context.Context, video, srt string) (string, error) {
+	close(b.started)
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func TestStepsAndCancel(t *testing.T) {
+	dir := t.TempDir()
+	big := strings.Repeat("v", 70*1024)
+	v1 := write(t, filepath.Join(dir, "Movie (2007).mkv"), big+"1")
+	v2 := write(t, filepath.Join(dir, "Other (2008).mkv"), big+"2")
+	srt := "1\r\n00:00:01,000 --> 00:00:02,000\r\nx\r\n"
+	fos := &fakeOS{files: map[int]string{1: srt}, byIMDb: map[int][]osdb.Subtitle{
+		0: {{ID: "a", Language: "pl", Title: "Movie", Files: []osdb.File{{ID: 1}}}}}}
+	bs := &blockingSyncer{started: make(chan struct{})}
+	cfg := config.Default()
+	cfg.Jobs = 1
+	var mu sync.Mutex
+	var steps []string
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &Runner{Config: cfg, Client: &fakeAPI{}, OS: fos,
+		NewSyncer: func(context.Context) (Syncer, error) { return bs, nil },
+		OnStep: func(v string, s Step) {
+			mu.Lock()
+			steps = append(steps, filepath.Base(v)+":"+string(s))
+			mu.Unlock()
+		}}
+	go func() { <-bs.started; cancel() }()
+	res := r.Run(ctx, []string{v1, v2})
+	got := strings.Join(steps, " ")
+	want := "Movie (2007).mkv:hash Movie (2007).mkv:napi Movie (2007).mkv:os Movie (2007).mkv:os Movie (2007).mkv:download Movie (2007).mkv:sync"
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("steps:\n%s\nwant prefix:\n%s", got, want)
+	}
+	if res[0].Status == Downloaded {
+		t.Errorf("cancelled sync reported as downloaded: %+v", res[0])
+	}
+	if res[1].Status != Failed || !errors.Is(res[1].Err, context.Canceled) {
+		t.Errorf("second video should be cancelled: %+v", res[1])
+	}
 }

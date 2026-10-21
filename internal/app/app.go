@@ -113,3 +113,17 @@ func Remember(results []batch.Result) {
 	}
 	pending.Default().Update(add, done)
 }
+
+// WriteRunLog saves the last run as CSV in %LOCALAPPDATA%\napi and returns
+// its path ("" on failure).
+func WriteRunLog(results []batch.Result) string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	p := filepath.Join(dir, "napi", "ostatnie.csv")
+	if WriteCSV(p, results) != nil {
+		return ""
+	}
+	return p
+}

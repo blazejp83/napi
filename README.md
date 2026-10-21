@@ -2,8 +2,9 @@
 
 Downloads Polish (and English) subtitles from [napiprojekt.pl](https://napiprojekt.pl) for video files and whole folder trees. Windows-first, a single portable exe, no installer.
 
-- **Explorer menu:** right-click a video, several videos, a folder or a folder background → *Pobierz napisy (NapiProjekt)*. No console window, one summary dialog per selection.
+- **Explorer menu:** right-click a video, several videos, a folder or a folder background → *Pobierz napisy (NapiProjekt)*. Progress shows in a card in the bottom-right corner (current step and file, overall progress, *Anuluj*); when done it shows the result with actions (*Pokaż plik*, *Otwórz stronę filmu*, *Szczegóły* with a per-file list) and closes itself after a clean success.
 - **Drag and drop** videos or folders onto `napiw.exe`.
+- **Settings window:** start `napiw.exe` on its own: languages, format, encoding, naming, OpenSubtitles login with a connection test, the Explorer menu switch.
 - **CLI** for batch jobs and scripts: `napi get D:\Filmy E:\Seriale`.
 - **Fallback to OpenSubtitles**, including subtitles made for *another release* of the same movie, automatically synced to your file's audio.
 
@@ -15,7 +16,7 @@ For each video, in order (each language from `languages` in turn for the exact s
 2. **OpenSubtitles, exact file** – by OpenSubtitles moviehash (`moviehash_match`).
 3. **OpenSubtitles, same movie, other release** – the movie is identified by its IMDb ID (NapiProjekt usually knows which movie a file belongs to even without subtitles, and the hash search often returns it too); failing that, by title and year from the file name. Candidates are ranked: preferred language, human over machine translations, then release name similarity (source, resolution, codec, group), same frame rate, popularity. The best one is downloaded, converted to SRT and aligned to the video's audio with [alass](https://github.com/kaegi/alass) (offsets, cuts/splits and 25 vs 23.976 fps speed differences). If that fails the second candidate is tried.
 
-4. **Nothing found, but NapiProjekt recognises the movie** (the case where the official app shows a cover) – the result names the movie and links its napiprojekt.pl page, which lists subtitles for other versions; the Explorer dialog offers to open it. Clicking a version's `napiprojekt:` link there downloads it and syncs it to the waiting video automatically (see below). The lookup only happens after all automatic sources failed.
+4. **Nothing found, but NapiProjekt recognises the movie** (the case where the official app shows a cover) – the result names the movie and links its napiprojekt.pl page, which lists subtitles for other versions; the corner card offers to open it. Clicking a version's `napiprojekt:` link there downloads it and syncs it to the waiting video automatically (see below). The lookup only happens after all automatic sources failed.
 
 Series episodes are handled throughout: NapiProjekt reports the series, season and episode for an episode's hash, and OpenSubtitles is then searched for that episode (`parent_imdb_id` + season + episode), falling back to `S01E04` in the file name. Before syncing, a candidate's length is checked against the video's duration (from the MKV/MP4/AVI header), so subtitles for another episode or a much longer cut are skipped without running alass.
 
@@ -46,9 +47,9 @@ The first time a sync is needed napi downloads alass 2.0.0 for Windows (26 MB, b
 ## Install
 
 1. Unzip `napi.exe` and `napiw.exe` into a permanent folder, e.g. `%LOCALAPPDATA%\napi`.
-2. Double-click `napiw.exe` → **Tak** (Yes) to add the Explorer menu, or run `napi menu install`. Registers for the current user only; no admin rights needed.
+2. Double-click `napiw.exe` and switch on *Menu Eksploratora i linki napiprojekt:*, or run `napi menu install`. Registers for the current user only; no admin rights needed.
    On Windows 11 the entry is under *Show more options* (Shift+F10).
-3. Remove with `napi menu uninstall` (or `napiw.exe` → **Nie**).
+3. Remove with `napi menu uninstall` (or the same switch in the settings window).
 
 ## CLI
 
@@ -58,6 +59,7 @@ napi get D:\Filmy E:\Seriale -l PL,ENG -r raport.csv
 napi get . --no-recursive --force     # this folder only, overwrite existing
 napi hash Film.mkv                    # NapiProjekt hash + detected frame rate
 napi search Film.mkv                  # OpenSubtitles candidates, ranked (needs API key)
+napi account                          # OpenSubtitles login check, downloads left today
 napi sync Film.mkv inne-napisy.txt    # align any subtitles to the video's audio → Film.srt
 napi sync Film.mkv napiprojekt:<hash> # same, for a version linked on napiprojekt.pl
 napi config                           # show settings file and values
@@ -89,9 +91,13 @@ The Explorer menu uses the same settings (`napi.json`) and writes the last run's
   MicroDVD is timed in frames, so its frame rate comes from the subtitle's own `{1}{1}23.976` header, then the video's MKV/MP4/AVI header, then `ffprobe` if it's on PATH, then `--fps`.
 - **Multi-select:** Explorer starts one process per selected file. Each drops its path into `%TEMP%\napi-queue`; the one holding a named mutex processes the whole queue and shows a single summary.
 
+## Interface
+
+`napiw.exe` is a [Wails](https://wails.io) v2 app: Go backend, the HTML/CSS/JS frontend in `internal/gui/web` is embedded (no npm build step) and rendered by the Edge WebView2 runtime that ships with Windows 10/11. The corner card is a frameless tool window (no taskbar button) with an acrylic backdrop and Windows 11 rounded corners, placed above the taskbar in physical pixels; the settings window uses the Mica backdrop. Both follow the system light/dark theme. The console `napi.exe` doesn't use WebView2.
+
 ## Build
 
-Requires Go 1.24. Cross-compiles from Linux/WSL:
+Requires Go 1.24+. Cross-compiles from Linux/WSL (`napiw` needs the `desktop,production` build tags, which `build.sh` sets):
 
 ```
 ./build.sh 0.1.0        # dist/napi.exe, dist/napiw.exe, dist/napi-0.1.0-windows-amd64.zip
