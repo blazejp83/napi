@@ -1,0 +1,92 @@
+# napi
+
+Downloads Polish (and English) subtitles from [napiprojekt.pl](https://napiprojekt.pl) for video files and whole folder trees. Windows-first, a single portable exe, no installer.
+
+- **Explorer menu:** right-click a video, several videos, a folder or a folder background → *Pobierz napisy (NapiProjekt)*. No console window, one summary dialog per selection.
+- **Drag and drop** videos or folders onto `napiw.exe`.
+- **CLI** for batch jobs and scripts: `napi get D:\Filmy E:\Seriale`.
+- **Fallback to OpenSubtitles**, including subtitles made for *another release* of the same movie, automatically synced to your file's audio.
+
+## Where subtitles come from
+
+For each video, in order (each language from `languages` in turn for the exact steps):
+
+1. **NapiProjekt, exact file** – by MD5 of the first 10 MiB.
+2. **OpenSubtitles, exact file** – by OpenSubtitles moviehash (`moviehash_match`).
+3. **OpenSubtitles, same movie, other release** – the movie is identified by its IMDb ID (NapiProjekt usually knows which movie a file belongs to even without subtitles, and the hash search often returns it too); failing that, by title and year from the file name. Candidates are ranked: preferred language, human over machine translations, then release name similarity (source, resolution, codec, group), same frame rate, popularity. The best one is downloaded, converted to SRT and aligned to the video's audio with [alass](https://github.com/kaegi/alass) (offsets, cuts/splits and 25 vs 23.976 fps speed differences). If that fails the second candidate is tried.
+
+4. **Nothing found, but NapiProjekt recognises the movie** (the case where the official app shows a cover) – the result names the movie and links its napiprojekt.pl page, which usually lists subtitles for other versions; the Explorer dialog offers to open it. Download one there and run `napi sync`. The lookup only happens after all automatic sources failed.
+
+Synced subtitles are marked in the output (`[OpenSubtitles, synced from <release>]`, `source` column in reports) and in the Explorer summary, because a different cut can still leave a scene off.
+
+Steps 2–3 need OpenSubtitles credentials; without them napi behaves as NapiProjekt-only. Step 3 can be turned off with `"sync": false`. A downloaded subtitle counts against the account's daily limit; when it's reached napi stops using OpenSubtitles for the rest of the run.
+
+Folders named `Featurettes`, `Extras`, `Trailers`, `Behind The Scenes`, `Deleted Scenes`, `Interviews`, `Samples` … are skipped when scanning (select such files directly if you want them), and step 3 never searches by a title without a year.
+
+## OpenSubtitles setup
+
+1. Create a free account at [opensubtitles.com](https://www.opensubtitles.com) and an API consumer at <https://www.opensubtitles.com/consumers> (gives the API key).
+2. `napi config init` and fill in `napi.json`:
+   ```json
+   "openSubtitles": { "apiKey": "…", "username": "…", "password": "…", "userAgent": "napi v0.2.0" }
+   ```
+   The login token is cached in `%LOCALAPPDATA%\napi` for 20 hours.
+3. Check with `napi search Film.mkv`, which lists the ranked candidates without downloading.
+
+## Sync tool
+
+The first time a sync is needed napi downloads alass 2.0.0 for Windows (26 MB, bundles ffmpeg; SHA-256 pinned) into `%LOCALAPPDATA%\napi\tools`. Set `alassPath` to use your own. A sync reads the movie's whole audio track: about 50 s for a 2-hour 4 GB file on a network drive.
+
+## Install
+
+1. Unzip `napi.exe` and `napiw.exe` into a permanent folder, e.g. `%LOCALAPPDATA%\napi`.
+2. Double-click `napiw.exe` → **Tak** (Yes) to add the Explorer menu, or run `napi menu install`. Registers for the current user only; no admin rights needed.
+   On Windows 11 the entry is under *Show more options* (Shift+F10).
+3. Remove with `napi menu uninstall` (or `napiw.exe` → **Nie**).
+
+## CLI
+
+```
+napi Film.mkv                         # same as "napi get Film.mkv"
+napi get D:\Filmy E:\Seriale -l PL,ENG -r raport.csv
+napi get . --no-recursive --force     # this folder only, overwrite existing
+napi hash Film.mkv                    # NapiProjekt hash + detected frame rate
+napi search Film.mkv                  # OpenSubtitles candidates, ranked (needs API key)
+napi sync Film.mkv inne-napisy.txt    # align any subtitles to the video's audio → Film.srt
+napi config                           # show settings file and values
+napi config init [--portable]         # write napi.json (portable: next to the exe)
+```
+
+| flag | default | |
+|---|---|---|
+| `-l, --lang` | `PL` | languages in order of preference: `PL`, `ENG`, `PL,ENG` |
+| `--format` | `srt` | `srt` converts every format to SubRip; `original` keeps what the server has (`.txt`) |
+| `-e, --encoding` | `utf8bom` | `utf8bom`, `utf8`, or `cp1250` for old TVs and players |
+| `-s, --suffix` | off | name files `Film.pl.srt` instead of `Film.srt` |
+| `-f, --force` | off | overwrite existing subtitles (otherwise videos that have any are skipped) |
+| `--no-recursive` | off | don't descend into subfolders |
+| `-j, --jobs` | `4` | videos in parallel; API requests are spaced at least 200 ms apart |
+| `--fps` | `23.976` | frame rate for MicroDVD conversion when the video's can't be read |
+| `-r, --report` | | write a CSV with one row per video |
+
+Exit code: `0` all videos have subtitles, `2` some weren't found, `1` errors.
+
+The Explorer menu uses the same settings (`napi.json`) and writes the last run's report to `%LOCALAPPDATA%\napi\ostatnie.csv`.
+
+## How it works
+
+- **Hash:** MD5 of the first 10 MiB of the video. `mode=2` with `downloaded_cover_id=<hash>` returns the movie the hash is associated with (title, year, IMDb link). The API's `mode` is a bitmask (1 subtitles, 2 movie info, 0x200 upload, 0x800 availability check …); there is no call listing a movie's other subtitle versions, and the napiprojekt.pl website that shows them is behind a Cloudflare challenge.
+- **API:** `POST https://napiprojekt.pl/api/api-napiprojekt3.php` with `mode=17`, the hash, `downloaded_subtitles_lang` and `downloaded_subtitles_txt=1`. Subtitles come back base64-encoded in XML. The server only answers whitelisted client names; `client` in `napi.json` defaults to `NapiProjektPython`.
+- **Charset:** UTF-8, windows-1250 or ISO-8859-2, detected per file.
+- **Formats:** MicroDVD, MPL2, TMPlayer and SRT are parsed; italics/bold become `<i>`/`<b>`.
+  MicroDVD is timed in frames, so its frame rate comes from the subtitle's own `{1}{1}23.976` header, then the video's MKV/MP4/AVI header, then `ffprobe` if it's on PATH, then `--fps`.
+- **Multi-select:** Explorer starts one process per selected file. Each drops its path into `%TEMP%\napi-queue`; the one holding a named mutex processes the whole queue and shows a single summary.
+
+## Build
+
+Requires Go 1.24. Cross-compiles from Linux/WSL:
+
+```
+./build.sh 0.1.0        # dist/napi.exe, dist/napiw.exe, dist/napi-0.1.0-windows-amd64.zip
+go test ./...           # NAPI_LIVE=1 also queries napiprojekt.pl
+```

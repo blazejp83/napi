@@ -1,0 +1,152 @@
+// Package winui contains the Windows integration: the Explorer context menu,
+// message boxes and the queue that merges multi-selection launches.
+package winui
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
+)
+
+const (
+	verbKey   = `napi`
+	menuLabel = "Pobierz napisy (NapiProjekt)"
+	classes   = `Software\Classes`
+)
+
+// MenuExecutable is the program the menu runs: napiw.exe next to the current
+// executable (no console window), or the current executable itself.
+func MenuExecutable() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	w := filepath.Join(filepath.Dir(exe), "napiw.exe")
+	if _, err := os.Stat(w); err == nil {
+		return w, nil
+	}
+	return exe, nil
+}
+
+func verbParents(exts []string) []string {
+	parents := []string{`Directory`, `Directory\Background`, `Drive`}
+	for _, e := range exts {
+		parents = append(parents, `SystemFileAssociations\.`+strings.ToLower(strings.TrimPrefix(e, ".")))
+	}
+	return parents
+}
+
+// InstallMenu registers the context-menu verb for the current user.
+func InstallMenu(exe string, exts []string) error {
+	for _, parent := range verbParents(exts) {
+		arg := "%1"
+		if parent == `Directory\Background` {
+			arg = "%V"
+		}
+		base := classes + `\` + parent + `\shell\` + verbKey
+		k, _, err := registry.CreateKey(registry.CURRENT_USER, base, registry.SET_VALUE)
+		if err != nil {
+			return fmt.Errorf("%s: %w", base, err)
+		}
+		k.SetStringValue("", menuLabel)
+		k.SetStringValue("Icon", exe)
+		// "Player" lets Explorer pass large selections instead of capping at 15.
+		k.SetStringValue("MultiSelectModel", "Player")
+		k.Close()
+		c, _, err := registry.CreateKey(registry.CURRENT_USER, base+`\command`, registry.SET_VALUE)
+		if err != nil {
+			return fmt.Errorf("%s: %w", base, err)
+		}
+		err = c.SetStringValue("", fmt.Sprintf(`"%s" "%s"`, exe, arg))
+		c.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UninstallMenu removes every verb InstallMenu may have created.
+func UninstallMenu() error {
+	root, err := registry.OpenKey(registry.CURRENT_USER, classes+`\SystemFileAssociations`, registry.ENUMERATE_SUB_KEYS)
+	var parents []string
+	if err == nil {
+		names, _ := root.ReadSubKeyNames(-1)
+		root.Close()
+		for _, n := range names {
+			parents = append(parents, `SystemFileAssociations\`+n)
+		}
+	}
+	parents = append(parents, verbParents(nil)...)
+	for _, parent := range parents {
+		base := classes + `\` + parent + `\shell\` + verbKey
+		for _, k := range []string{base + `\command`, base} {
+			if err := registry.DeleteKey(registry.CURRENT_USER, k); err != nil && !errors.Is(err, registry.ErrNotExist) {
+				return fmt.Errorf("%s: %w", k, err)
+			}
+		}
+	}
+	return nil
+}
+
+// Message box flags.
+const (
+	MBOK          = 0x0
+	MBYesNo       = 0x4
+	MBYesNoCancel = 0x3
+	MBIconError   = 0x10
+	MBIconWarning = 0x30
+	MBIconInfo    = 0x40
+	IDYes         = 6
+	IDNo          = 7
+)
+
+var procMessageBox = windows.NewLazySystemDLL("user32.dll").NewProc("MessageBoxW")
+
+// MessageBox shows a modal dialog and returns the button pressed.
+func MessageBox(title, text string, flags uint32) int {
+	t, _ := windows.UTF16PtrFromString(title)
+	m, _ := windows.UTF16PtrFromString(text)
+	r, _, _ := procMessageBox.Call(0, uintptr(unsafe.Pointer(m)), uintptr(unsafe.Pointer(t)), uintptr(flags|0x10000)) // MB_SETFOREGROUND
+	return int(r)
+}
+
+// Lock is a named mutex that elects one process to handle queued paths.
+// Windows mutexes belong to a thread, so callers must runtime.LockOSThread.
+type Lock struct{ h windows.Handle }
+
+func NewLock(name string) (*Lock, error) {
+	n, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return nil, err
+	}
+	h, err := windows.CreateMutex(nil, false, n)
+	if h == 0 {
+		return nil, err
+	}
+	return &Lock{h}, nil
+}
+
+// TryLock takes the mutex if no other process holds it.
+func (l *Lock) TryLock() bool {
+	ev, _ := windows.WaitForSingleObject(l.h, 0)
+	return ev == windows.WAIT_OBJECT_0 || ev == windows.WAIT_ABANDONED
+}
+
+func (l *Lock) Unlock() { windows.ReleaseMutex(l.h) }
+
+// OpenURL opens a web page in the default browser.
+func OpenURL(u string) error {
+	verb, _ := windows.UTF16PtrFromString("open")
+	target, err := windows.UTF16PtrFromString(u)
+	if err != nil {
+		return err
+	}
+	return windows.ShellExecute(0, verb, target, nil, nil, windows.SW_SHOWNORMAL)
+}
