@@ -34,9 +34,15 @@ func findWindow(title string) uintptr {
 // styleCorner turns the panel window into a tool window (no taskbar button
 // or Alt+Tab entry) with Windows 11 rounded corners.
 func styleCorner(hwnd uintptr) {
-	const gwlExStyle = ^uintptr(19) // -20
+	const gwlStyle, gwlExStyle = ^uintptr(15), ^uintptr(19) // -16, -20
 	ex, _, _ := procGetLong.Call(hwnd, gwlExStyle)
 	procSetLong.Call(hwnd, gwlExStyle, (ex|0x80)&^0x40000) // +WS_EX_TOOLWINDOW, -WS_EX_APPWINDOW
+	// Without the system menu and min/max boxes DWM stops drawing its own
+	// caption buttons (a red close button) into the translucent frame.
+	st, _, _ := procGetLong.Call(hwnd, gwlStyle)
+	procSetLong.Call(hwnd, gwlStyle, st&^(0x80000|0x20000|0x10000)) // WS_SYSMENU, WS_MINIMIZEBOX, WS_MAXIMIZEBOX
+	const swpNoSize, swpNoMove, swpNoZOrder, swpNoActivate, swpFrameChanged = 0x1, 0x2, 0x4, 0x10, 0x20
+	procSetPos.Call(hwnd, 0, 0, 0, 0, 0, swpNoSize|swpNoMove|swpNoZOrder|swpNoActivate|swpFrameChanged)
 	round := uint32(2)                                     // DWMWCP_ROUND
 	procDwmSet.Call(hwnd, 33, uintptr(unsafe.Pointer(&round)), 4)
 }

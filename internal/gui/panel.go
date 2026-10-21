@@ -12,6 +12,7 @@ import (
 
 	"github.com/blaze/napi/internal/app"
 	"github.com/blaze/napi/internal/batch"
+	"github.com/blaze/napi/internal/napi"
 	"github.com/blaze/napi/internal/pending"
 )
 
@@ -244,6 +245,10 @@ func LinkJob(hash string) func(ctx context.Context, a *App) {
 		})
 		r := batch.NewRunner(a.cfg)
 		sub, err := app.DownloadNapiHash(ctx, r, hash)
+		if errors.Is(err, napi.ErrNotFound) {
+			a.finishError("NapiProjekt nie ma już napisów pod tym linkiem.")
+			return
+		}
 		if err != nil {
 			a.finishError("Nie udało się pobrać napisów z linku: " + err.Error())
 			return
