@@ -47,6 +47,7 @@ type Subtitle struct {
 	FromTrusted       bool
 	IMDbID            int
 	Title             string
+	ParentTitle       string // the series, for episodes
 	Files             []File
 }
 
@@ -88,10 +89,12 @@ func (c *Client) Configured() bool { return c != nil && c.APIKey != "" }
 // Query selects subtitles; zero fields are omitted.
 type Query struct {
 	MovieHash string
-	IMDbID    int
+	IMDbID    int    // movie, or the series when Season/Episode are set
 	Text      string // title, used when there is no IMDb ID
 	Year      int
-	Languages []string // ISO 639-1
+	// Season and Episode select one episode of a series.
+	Season, Episode int
+	Languages       []string // ISO 639-1
 }
 
 func (c *Client) do(ctx context.Context, method, endpoint string, body any, auth bool, out any) error {
@@ -164,8 +167,17 @@ func (c *Client) Search(ctx context.Context, q Query) ([]Subtitle, error) {
 	if q.MovieHash != "" {
 		v.Set("moviehash", strings.ToLower(q.MovieHash))
 	}
+	episode := q.Episode > 0
 	if q.IMDbID > 0 {
-		v.Set("imdb_id", strconv.Itoa(q.IMDbID))
+		if episode {
+			v.Set("parent_imdb_id", strconv.Itoa(q.IMDbID))
+		} else {
+			v.Set("imdb_id", strconv.Itoa(q.IMDbID))
+		}
+	}
+	if episode {
+		v.Set("season_number", strconv.Itoa(q.Season))
+		v.Set("episode_number", strconv.Itoa(q.Episode))
 	}
 	if q.Text != "" && q.IMDbID == 0 {
 		v.Set("query", strings.ToLower(q.Text))
@@ -190,6 +202,7 @@ func (c *Client) Search(ctx context.Context, q Query) ([]Subtitle, error) {
 			AITranslated: a.AITranslated, MachineTranslated: a.MachineTranslated,
 			ForeignPartsOnly: a.ForeignPartsOnly, MovieHashMatch: a.MovieHashMatch,
 			FromTrusted: a.FromTrusted, IMDbID: int(a.FeatureDetails.IMDbID), Title: a.FeatureDetails.Title,
+			ParentTitle: a.FeatureDetails.ParentTitle,
 		}
 		for _, f := range a.Files {
 			s.Files = append(s.Files, File{ID: int(f.FileID), Name: f.FileName})
@@ -231,8 +244,9 @@ type searchResponse struct {
 			MovieHashMatch    bool   `json:"moviehash_match"`
 			FromTrusted       bool   `json:"from_trusted"`
 			FeatureDetails    struct {
-				IMDbID num    `json:"imdb_id"`
-				Title  string `json:"title"`
+				IMDbID      num    `json:"imdb_id"`
+				Title       string `json:"title"`
+				ParentTitle string `json:"parent_title"`
 			} `json:"feature_details"`
 			Files []struct {
 				FileID   num    `json:"file_id"`

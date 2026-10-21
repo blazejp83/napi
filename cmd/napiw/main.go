@@ -1,8 +1,9 @@
 //go:build windows
 
-// Command napiw is the windowless front end used by the Explorer menu and by
-// dropping files onto the exe. It shows a summary dialog when done; run
-// without arguments it offers to install or remove the menu.
+// Command napiw is the windowless front end used by the Explorer menu, by
+// dropping files onto the exe and by napiprojekt: links on napiprojekt.pl.
+// It shows a summary dialog when done; run without arguments it offers to
+// install or remove the menu.
 package main
 
 import (
@@ -17,6 +18,7 @@ import (
 	"github.com/blaze/napi/internal/app"
 	"github.com/blaze/napi/internal/batch"
 	"github.com/blaze/napi/internal/config"
+	"github.com/blaze/napi/internal/pending"
 	"github.com/blaze/napi/internal/winui"
 )
 
@@ -31,6 +33,12 @@ func main() {
 	if err != nil {
 		winui.MessageBox(title, "Błąd w pliku ustawień:\n"+err.Error(), winui.MBIconError)
 		os.Exit(1)
+	}
+	if len(os.Args) == 2 {
+		if hash, ok := app.NapiLinkHash(os.Args[1]); ok {
+			link(cfg, hash)
+			return
+		}
 	}
 
 	// Explorer starts one process per selected item. Each queues its paths;
@@ -74,6 +82,7 @@ func run(cfg config.Config, paths []string) {
 		return
 	}
 	results := batch.NewRunner(cfg).Run(context.Background(), videos)
+	app.Remember(results)
 	logPath := writeLog(results)
 	s := batch.Summarize(results)
 
@@ -148,8 +157,8 @@ func run(cfg config.Config, paths []string) {
 		return
 	}
 	if len(pages) == 1 {
-		fmt.Fprintf(&b, "\n\nNapiProjekt rozpoznaje film: %s.\nNa stronie filmu mogą być napisy do innych wersji "+
-			"(pobrane możesz dopasować poleceniem \"napi sync\").\n\nOtworzyć stronę filmu?", names[0])
+		fmt.Fprintf(&b, "\n\nNapiProjekt rozpoznaje film: %s.\nNa stronie filmu mogą być napisy do innych wersji – "+
+			"kliknij tam napisy, a zostaną automatycznie dopasowane do tego pliku.\n\nOtworzyć stronę filmu?", names[0])
 	} else {
 		fmt.Fprintf(&b, "\n\nNapiProjekt rozpoznaje %d z tych filmów – na ich stronach mogą być napisy do innych wersji:", len(pages))
 		for i, n := range names {
@@ -159,7 +168,7 @@ func run(cfg config.Config, paths []string) {
 			}
 			b.WriteString("\n• " + n)
 		}
-		b.WriteString("\n\nOtworzyć strony filmów?")
+		b.WriteString("\n\nKliknięte tam napisy zostaną automatycznie dopasowane do plików.\nOtworzyć strony filmów?")
 	}
 	if winui.MessageBox(title, b.String(), winui.MBYesNo|icon) == winui.IDYes {
 		for i, p := range pages {
@@ -207,4 +216,58 @@ func setup() {
 		}
 		winui.MessageBox(title, "Usunięto z menu.", winui.MBIconInfo)
 	}
+}
+
+// link handles a napiprojekt:<hash> link clicked on a movie's page: it
+// downloads that version's subtitles and syncs them to the video waiting for
+// them (or one the user picks).
+func link(cfg config.Config, hash string) {
+	ctx := context.Background()
+	r := batch.NewRunner(cfg)
+	sub, err := app.DownloadNapiHash(ctx, r, hash)
+	if err != nil {
+		winui.MessageBox(title, "Nie udało się pobrać napisów z linku:\n"+err.Error(), winui.MBIconError)
+		return
+	}
+	movie, _ := r.Movies.MovieInfo(ctx, hash)
+	store := pending.Default()
+	video := ""
+	switch m := store.Match(movie); len(m) {
+	case 1:
+		video = m[0].Video
+	default:
+		dir := ""
+		if len(m) > 0 {
+			dir = filepath.Dir(m[0].Video)
+		}
+		what := "tych napisów"
+		if movie != nil {
+			what = movie.Name()
+		}
+		video = winui.ChooseVideo("Wybierz plik filmu dla: "+what, dir, cfg.Extensions)
+	}
+	if video == "" {
+		return
+	}
+	// Syncing reads the whole audio track; tell the user it is under way.
+	done := make(chan batch.Result, 1)
+	go func() {
+		res := r.SyncSubtitles(ctx, video, sub.Content, sub.Lang, batch.FromNapiOther, "napiprojekt:"+hash)
+		app.Remember([]batch.Result{res}) // before any dialog, which may be left open
+		done <- res
+	}()
+	var res batch.Result
+	select {
+	case res = <-done:
+	case <-time.After(1500 * time.Millisecond):
+		winui.MessageBox(title, "Pobrano napisy ("+sub.Lang+"). Trwa dopasowywanie do:\n"+filepath.Base(video)+
+			"\n\nTo potrwa około minuty – wynik pokaże się po zakończeniu.", winui.MBIconInfo)
+		res = <-done
+	}
+	if res.Err != nil {
+		winui.MessageBox(title, "Nie udało się dopasować napisów do "+filepath.Base(video)+":\n"+res.Err.Error(), winui.MBIconError)
+		return
+	}
+	winui.MessageBox(title, "Gotowe – napisy dopasowane do filmu:\n"+filepath.Base(res.Output)+
+		"\n\nNapisy pochodzą z innej wersji filmu, sprawdź, czy pasują.", winui.MBIconInfo)
 }

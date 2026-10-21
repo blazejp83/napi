@@ -142,15 +142,24 @@ func Rank(cands []Subtitle, videoName string, videoFPS float64, langs []string) 
 var (
 	reParenYear = regexp.MustCompile(`^(.*?)\s*[(\[]((?:19|20)\d{2})[)\]]`)
 	reYear      = regexp.MustCompile(`[\s._\-]((?:19|20)\d{2})(?:[\s._\-]|$)`)
-	reEpisode   = regexp.MustCompile(`(?i)\bS\d{1,2}E\d{1,3}\b`)
 	reJunk      = regexp.MustCompile(`(?i)[\s._\-(\[]+(2160p|1080p|720p|480p|bluray|bdrip|brrip|web|webrip|web-dl|hdtv|dvdrip|x264|x265|hevc|h264)(?:[\s._\-)\]]|$).*$`)
 )
 
-// GuessTitle extracts a search title and year from a video file name, e.g.
-// "4 Months, 3 Weeks and 2 Days (2007) (1080p x265).mkv" -> ("4 Months, 3 Weeks and 2 Days", 2007).
-func GuessTitle(path string) (string, int) {
+// Guess is what a video's file name says about it.
+type Guess struct {
+	Title           string
+	Year            int
+	Season, Episode int // set for "Show.Name.S01E04" style names
+}
+
+var reSxxEyy = regexp.MustCompile(`(?i)^(.*?)[\s._\-]*\bS(\d{1,2})E(\d{1,3})\b`)
+
+// GuessTitle extracts a search title from a video file name, e.g.
+// "4 Months, 3 Weeks and 2 Days (2007) (1080p x265).mkv" -> "4 Months, 3 Weeks and 2 Days", 2007
+// "All.Her.Fault.S01E04.1080p.WEB.H264-SYLiX.mkv" -> "All Her Fault", season 1, episode 4.
+func GuessTitle(path string) Guess {
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	year := 0
+	var g Guess
 	atoi := func(s string) int {
 		n := 0
 		for _, c := range s {
@@ -158,28 +167,38 @@ func GuessTitle(path string) (string, int) {
 		}
 		return n
 	}
-	if loc := reEpisode.FindStringIndex(name); loc != nil {
-		name = name[:loc[1]]
+	if m := reSxxEyy.FindStringSubmatch(name); m != nil {
+		name, g.Season, g.Episode = m[1], atoi(m[2]), atoi(m[3])
+		// "Show (2025) S01E04" or "Show.2025.S01E04"
+		if y := reParenYear.FindStringSubmatch(name); y != nil && strings.TrimSpace(y[1]) != "" {
+			name, g.Year = y[1], atoi(y[2])
+		} else if all := reYear.FindAllStringSubmatchIndex(name+".", -1); len(all) > 0 && all[len(all)-1][0] > 0 {
+			last := all[len(all)-1]
+			name, g.Year = name[:last[0]], atoi(name[last[2]:last[3]])
+		}
 	} else if m := reParenYear.FindStringSubmatch(name); m != nil && strings.TrimSpace(m[1]) != "" {
-		name, year = m[1], atoi(m[2])
+		name, g.Year = m[1], atoi(m[2])
 	} else if all := reYear.FindAllStringSubmatchIndex(name, -1); len(all) > 0 && all[len(all)-1][0] > 0 {
 		// The last year-like number is the year: "Blade.Runner.2049.2017.1080p".
 		last := all[len(all)-1]
-		name, year = name[:last[0]], atoi(name[last[2]:last[3]])
+		name, g.Year = name[:last[0]], atoi(name[last[2]:last[3]])
 	} else {
 		name = reJunk.ReplaceAllString(name, "")
 	}
 	name = strings.NewReplacer(".", " ", "_", " ").Replace(name)
-	return strings.Join(strings.Fields(name), " "), year
+	g.Title = strings.Join(strings.Fields(name), " ")
+	return g
 }
 
-// SameTitle keeps results whose movie title matches title, ignoring case and
-// punctuation; a text search also returns loosely related movies.
+// SameTitle keeps results whose movie (or, for episodes, series) title
+// matches title, ignoring case and punctuation; a text search also returns
+// loosely related titles.
 func SameTitle(cands []Subtitle, title string) []Subtitle {
-	want := strings.Join(reTokens.FindAllString(strings.ToLower(title), -1), " ")
+	norm := func(s string) string { return strings.Join(reTokens.FindAllString(strings.ToLower(s), -1), " ") }
+	want := norm(title)
 	var out []Subtitle
 	for _, s := range cands {
-		if strings.Join(reTokens.FindAllString(strings.ToLower(s.Title), -1), " ") == want {
+		if norm(s.Title) == want || norm(s.ParentTitle) == want {
 			out = append(out, s)
 		}
 	}

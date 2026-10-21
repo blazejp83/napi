@@ -3,6 +3,7 @@ package media
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func TestFrameRate(t *testing.T) {
@@ -33,5 +34,20 @@ func TestFrameRateUnknown(t *testing.T) {
 	t.Setenv("PATH", "")
 	if _, _, err := FrameRate("fps_test.go"); err == nil {
 		t.Fatal("expected an error for a non-video file")
+	}
+}
+
+func TestDuration(t *testing.T) {
+	t.Setenv("PATH", "")
+	for _, f := range []string{"testdata/fps_25.mkv", "testdata/fps_24000_1001.mp4", "testdata/fps_30000_1001.avi"} {
+		d, err := Duration(f)
+		if err != nil {
+			t.Errorf("%s: %v", f, err)
+			continue
+		}
+		// The fixtures are 0.5 s clips.
+		if d < 450*time.Millisecond || d > 600*time.Millisecond {
+			t.Errorf("%s: duration %v", f, d)
+		}
 	}
 }

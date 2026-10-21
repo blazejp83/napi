@@ -42,19 +42,17 @@ print('%016x'%h)`
 }
 
 func TestGuessTitle(t *testing.T) {
-	for in, want := range map[string]struct {
-		title string
-		year  int
-	}{
-		`Z:\Filmy\4 Months, 3 Weeks and 2 Days (2007) (1080p x265 Silence).mkv`: {"4 Months, 3 Weeks and 2 Days", 2007},
-		"The.Big.Lebowski.1998.1080p.BluRay.x264-AMIABLE.mkv":                   {"The Big Lebowski", 1998},
-		"Blade Runner 2049 (2017).mkv":                                          {"Blade Runner 2049", 2017},
-		"Show.Name.S02E05.720p.WEB.h264.mkv":                                    {"Show Name S02E05", 0},
-		"some_movie_1080p_x265.mp4":                                             {"some movie", 0},
+	for in, want := range map[string]Guess{
+		`Z:\Filmy\4 Months, 3 Weeks and 2 Days (2007) (1080p x265 Silence).mkv`: {Title: "4 Months, 3 Weeks and 2 Days", Year: 2007},
+		"The.Big.Lebowski.1998.1080p.BluRay.x264-AMIABLE.mkv":                   {Title: "The Big Lebowski", Year: 1998},
+		"Blade Runner 2049 (2017).mkv":                                          {Title: "Blade Runner 2049", Year: 2017},
+		"All.Her.Fault.S01E04.1080p.WEB.H264-SYLiX.mkv":                         {Title: "All Her Fault", Season: 1, Episode: 4},
+		"Show.Name.2019.S02E15.720p.WEB.h264.mkv":                               {Title: "Show Name", Year: 2019, Season: 2, Episode: 15},
+		"Show Name (2025) - s1e3.mkv":                                           {Title: "Show Name", Year: 2025, Season: 1, Episode: 3},
+		"some_movie_1080p_x265.mp4":                                             {Title: "some movie"},
 	} {
-		title, year := GuessTitle(filepath.FromSlash(strings.ReplaceAll(in, `\`, "/")))
-		if title != want.title || year != want.year {
-			t.Errorf("GuessTitle(%q) = %q, %d; want %q, %d", in, title, year, want.title, want.year)
+		if got := GuessTitle(filepath.FromSlash(strings.ReplaceAll(in, `\`, "/"))); got != want {
+			t.Errorf("GuessTitle(%q) = %+v; want %+v", in, got, want)
 		}
 	}
 }
@@ -90,8 +88,9 @@ func TestClient(t *testing.T) {
 		}
 		switch r.URL.Path {
 		case "/api/v1/subtitles":
-			if r.URL.RawQuery != "imdb_id=1032846&languages=pl%2Cen&moviehash=00ff" {
-				t.Errorf("query %q", r.URL.RawQuery)
+			if q := r.URL.RawQuery; q != "imdb_id=1032846&languages=pl%2Cen&moviehash=00ff" &&
+				q != "episode_number=4&languages=pl&parent_imdb_id=31314751&season_number=1" {
+				t.Errorf("query %q", q)
 			}
 			w.Write([]byte(`{"data":[{"id":"7","attributes":{"language":"pl","release":"R","fps":"23.976",
 				"download_count":12,"moviehash_match":true,"feature_details":{"imdb_id":1032846,"title":"T"},
@@ -137,6 +136,9 @@ func TestClient(t *testing.T) {
 	h := hits[0]
 	if h.FPS != 23.976 || !h.MovieHashMatch || h.IMDbID != 1032846 || h.Files[0].ID != 99 || h.DownloadCount != 12 {
 		t.Fatalf("parsed %+v", h)
+	}
+	if _, err := c.Search(ctx, Query{IMDbID: 31314751, Season: 1, Episode: 4, Languages: []string{"pl"}}); err != nil {
+		t.Fatal(err)
 	}
 	data, err := c.Download(ctx, 99)
 	if err != nil || !strings.Contains(string(data), "00:00:01,000") {

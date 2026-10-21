@@ -20,7 +20,10 @@ type Movie struct {
 	Title  string
 	Other  []string
 	Year   int
-	IMDbID int // numeric part of tt1234567, 0 if unknown
+	IMDbID int // numeric part of tt1234567, 0 if unknown; a series' ID for episodes
+	// Series is set for TV episodes, with the episode's season and number.
+	Series          bool
+	Season, Episode int
 }
 
 var reIMDb = regexp.MustCompile(`tt(\d{5,9})`)
@@ -31,12 +34,17 @@ func (m *Movie) PageURL() string {
 	return "https://www.napiprojekt.pl/index.php?dz=16&film=" + url.QueryEscape(m.ID)
 }
 
-// Name is the title with the year, e.g. "4 miesiące, 3 tygodnie i 2 dni (2007)".
+// Name is the title with the year, e.g. "4 miesiące, 3 tygodnie i 2 dni (2007)",
+// and the episode for series: "To jej wina (2025) S01E04".
 func (m *Movie) Name() string {
+	n := m.Title
 	if m.Year > 0 {
-		return fmt.Sprintf("%s (%d)", m.Title, m.Year)
+		n = fmt.Sprintf("%s (%d)", n, m.Year)
 	}
-	return m.Title
+	if m.Series && m.Episode > 0 {
+		n += fmt.Sprintf(" S%02dE%02d", m.Season, m.Episode)
+	}
+	return n
 }
 
 // MovieInfo looks up the movie associated with a file hash (API mode 2).
@@ -75,8 +83,11 @@ func (c *Client) MovieInfo(ctx context.Context, hash string) (*Movie, error) {
 					Value string `xml:",chardata"`
 				} `xml:",any"`
 			} `xml:"other_titles"`
-			Year  string `xml:"year"`
-			Links struct {
+			Year    string `xml:"year"`
+			Series  string `xml:"tv_series"`
+			Season  string `xml:"season"`
+			Episode string `xml:"episode"`
+			Links   struct {
 				IMDb string `xml:"imdb_com"`
 			} `xml:"direct_links"`
 		} `xml:"movie"`
@@ -89,6 +100,9 @@ func (c *Client) MovieInfo(ctx context.Context, hash string) (*Movie, error) {
 	}
 	m := &Movie{ID: r.Movie.ID, Title: strings.TrimSpace(r.Movie.Title)}
 	m.Year, _ = strconv.Atoi(strings.TrimSpace(r.Movie.Year))
+	m.Series = strings.TrimSpace(r.Movie.Series) == "1"
+	m.Season, _ = strconv.Atoi(strings.TrimSpace(r.Movie.Season))
+	m.Episode, _ = strconv.Atoi(strings.TrimSpace(r.Movie.Episode))
 	for _, o := range r.Movie.Other.Inner {
 		if v := strings.TrimSpace(o.Value); v != "" {
 			m.Other = append(m.Other, v)

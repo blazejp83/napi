@@ -10,6 +10,8 @@ import (
 	"strconv"
 
 	"github.com/blaze/napi/internal/batch"
+	"github.com/blaze/napi/internal/napi"
+	"github.com/blaze/napi/internal/pending"
 )
 
 // Version is set at build time with -ldflags "-X github.com/blaze/napi/internal/app.Version=...".
@@ -73,6 +75,8 @@ func Describe(r batch.Result) string {
 			s += " [OpenSubtitles]"
 		case batch.FromOSSynced:
 			s += " [OpenSubtitles, synced from " + r.Release + "]"
+		case batch.FromNapiOther:
+			s += " [NapiProjekt, other version synced: " + r.Release + "]"
 		}
 		if r.Warning != "" {
 			s += " ! " + r.Warning
@@ -92,4 +96,20 @@ func Describe(r batch.Result) string {
 		}
 	}
 	return r.Warning
+}
+
+// Remember records unmatched videos NapiProjekt recognises (for later
+// napiprojekt: links) and forgets ones that got subtitles.
+func Remember(results []batch.Result) {
+	add := map[string]*napi.Movie{}
+	var done []string
+	for _, r := range results {
+		switch {
+		case r.Status == batch.NotFound && r.Movie != nil:
+			add[r.Video] = r.Movie
+		case r.Status == batch.Downloaded || r.Status == batch.Skipped:
+			done = append(done, r.Video)
+		}
+	}
+	pending.Default().Update(add, done)
 }

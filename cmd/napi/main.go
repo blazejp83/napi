@@ -148,6 +148,7 @@ func runGet(ctx context.Context, args []string, cfg config.Config, f getFlags) e
 		fmt.Printf("[%*d/%d] %-9s %s  %s\n", width, done, total, r.Status, displayPath(r.Video, args), app.Describe(r))
 	}
 	results := runner.Run(ctx, videos)
+	app.Remember(results)
 	s := batch.Summarize(results)
 	fmt.Printf("\nDownloaded %d, already had %d, not found %d, errors %d\n", s.Downloaded, s.Skipped, s.NotFound, s.Failed)
 	if f.report != "" {
@@ -318,6 +319,7 @@ func menuCmd() *cobra.Command {
 				return err
 			}
 			fmt.Println("Installed. Right-click a video or folder → \"Pobierz napisy\" (Windows 11: Show more options).")
+			fmt.Println("napiprojekt: links on napiprojekt.pl now open napi (for this user; uninstall restores the official app).")
 			fmt.Println("Command:", exe)
 			return nil
 		},

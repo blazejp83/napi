@@ -15,7 +15,13 @@ For each video, in order (each language from `languages` in turn for the exact s
 2. **OpenSubtitles, exact file** – by OpenSubtitles moviehash (`moviehash_match`).
 3. **OpenSubtitles, same movie, other release** – the movie is identified by its IMDb ID (NapiProjekt usually knows which movie a file belongs to even without subtitles, and the hash search often returns it too); failing that, by title and year from the file name. Candidates are ranked: preferred language, human over machine translations, then release name similarity (source, resolution, codec, group), same frame rate, popularity. The best one is downloaded, converted to SRT and aligned to the video's audio with [alass](https://github.com/kaegi/alass) (offsets, cuts/splits and 25 vs 23.976 fps speed differences). If that fails the second candidate is tried.
 
-4. **Nothing found, but NapiProjekt recognises the movie** (the case where the official app shows a cover) – the result names the movie and links its napiprojekt.pl page, which usually lists subtitles for other versions; the Explorer dialog offers to open it. Download one there and run `napi sync`. The lookup only happens after all automatic sources failed.
+4. **Nothing found, but NapiProjekt recognises the movie** (the case where the official app shows a cover) – the result names the movie and links its napiprojekt.pl page, which lists subtitles for other versions; the Explorer dialog offers to open it. Clicking a version's `napiprojekt:` link there downloads it and syncs it to the waiting video automatically (see below). The lookup only happens after all automatic sources failed.
+
+Series episodes are handled throughout: NapiProjekt reports the series, season and episode for an episode's hash, and OpenSubtitles is then searched for that episode (`parent_imdb_id` + season + episode), falling back to `S01E04` in the file name. Before syncing, a candidate's length is checked against the video's duration (from the MKV/MP4/AVI header), so subtitles for another episode or a much longer cut are skipped without running alass.
+
+### napiprojekt: links
+
+`napi menu install` also registers the `napiprojekt:` URL scheme used on napiprojekt.pl movie pages (for the current user; it overrides the official client's handler, and `napi menu uninstall` restores it). Videos that ended in step 4 are remembered for 14 days in `%LOCALAPPDATA%\napi\pending.json` with their movie and episode. Clicking a link downloads that version and syncs it to the remembered video of the same movie/episode; if none or several match, a file picker asks which video it is for. The same works from the command line: `napi sync Odcinek.mkv napiprojekt:<hash>`.
 
 Synced subtitles are marked in the output (`[OpenSubtitles, synced from <release>]`, `source` column in reports) and in the Explorer summary, because a different cut can still leave a scene off.
 
@@ -53,6 +59,7 @@ napi get . --no-recursive --force     # this folder only, overwrite existing
 napi hash Film.mkv                    # NapiProjekt hash + detected frame rate
 napi search Film.mkv                  # OpenSubtitles candidates, ranked (needs API key)
 napi sync Film.mkv inne-napisy.txt    # align any subtitles to the video's audio → Film.srt
+napi sync Film.mkv napiprojekt:<hash> # same, for a version linked on napiprojekt.pl
 napi config                           # show settings file and values
 napi config init [--portable]         # write napi.json (portable: next to the exe)
 ```

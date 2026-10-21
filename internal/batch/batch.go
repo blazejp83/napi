@@ -30,6 +30,8 @@ const (
 	FromNapi     Source = "napiprojekt"
 	FromOS       Source = "opensubtitles"
 	FromOSSynced Source = "opensubtitles+sync"
+	// FromNapiOther is another version from a napiprojekt: link, synced.
+	FromNapiOther Source = "napiprojekt+sync"
 )
 
 const (
@@ -372,27 +374,12 @@ func (r *Runner) osDownload(ctx context.Context, s osdb.Subtitle, res *Result) (
 	return data, err
 }
 
-// similar finds subtitles made for another release of the same movie on
-// OpenSubtitles and syncs the best candidate to the video's audio.
+// similar finds subtitles made for another release of the same movie (or
+// episode) on OpenSubtitles and syncs the best candidate to the video's audio.
 func (r *Runner) similar(ctx context.Context, video, hash string, hashHits []osdb.Subtitle, res *Result) (Result, bool) {
-	q := osdb.Query{Languages: r.osLangs()}
-	for _, s := range hashHits {
-		if s.IMDbID > 0 {
-			q.IMDbID = s.IMDbID
-			break
-		}
-	}
-	if q.IMDbID == 0 {
-		if m := r.movie(ctx, hash, res); m != nil && m.IMDbID > 0 {
-			q.IMDbID = m.IMDbID
-		}
-	}
-	if q.IMDbID == 0 {
-		// A bare title is too weak a signal ("Trailer.mkv"); require a year.
-		q.Text, q.Year = osdb.GuessTitle(video)
-		if q.Text == "" || q.Year == 0 {
-			return Result{}, false
-		}
+	q, ok := r.similarQuery(ctx, video, hash, hashHits, res)
+	if !ok {
+		return Result{}, false
 	}
 	cands, err := r.osSearch(ctx, q)
 	if err != nil {
@@ -404,42 +391,122 @@ func (r *Runner) similar(ctx context.Context, video, hash string, hashHits []osd
 	}
 	fps, _, _ := media.FrameRate(video)
 	ranked := osdb.Rank(cands, filepath.Base(video), fps, r.osLangs())
-	if len(ranked) == 0 {
-		return Result{}, false
-	}
-	syncer, err := r.getSyncer(ctx)
-	if err != nil {
-		addWarning(res, "sync unavailable: "+err.Error())
-		return Result{}, false
-	}
-	// Try the two best candidates: a bad sync of the first usually means it
-	// was made for a very different cut.
-	for _, s := range ranked[:min(2, len(ranked))] {
+	// Each download counts against the daily limit; three candidates cover
+	// a wrong length or a failed sync without burning through it.
+	for _, s := range ranked[:min(3, len(ranked))] {
 		content, err := r.osDownload(ctx, s, res)
 		if err != nil {
 			return Result{}, false
 		}
-		text, srt, err := toSRT(video, content, r.Config.DefaultFPS)
-		if err != nil {
+		lang := strings.ToUpper(s.Language)
+		if lang == "EN" {
+			lang = "ENG"
+		}
+		if err := r.syncContent(ctx, video, content, lang, res); err != nil {
 			addWarning(res, fmt.Sprintf("%s: %v", s.Release, err))
+			if errors.Is(err, errNoSyncer) {
+				return Result{}, false
+			}
 			continue
-		}
-		synced, err := r.runSync(ctx, syncer, video, srt)
-		if err != nil {
-			addWarning(res, fmt.Sprintf("sync of %s failed: %v", s.Release, err))
-			continue
-		}
-		res.Charset, res.Format = text.charset, text.format
-		res.Lang = strings.ToUpper(s.Language)
-		if res.Lang == "EN" {
-			res.Lang = "ENG"
 		}
 		res.Source, res.Release = FromOSSynced, s.Release
-		out := OutputPath(video, res.Lang, ".srt", r.Config.LangSuffix)
-		res.Output = out
-		return r.finish(*res, writeAtomic(out, subs.Encode(synced, r.Config.Encoding))), true
+		return r.finish(*res, nil), true
 	}
 	return Result{}, false
+}
+
+// similarQuery identifies the movie or episode to search for: from
+// NapiProjekt's movie info, the IMDb ID OpenSubtitles' hash search returned,
+// or the file name.
+func (r *Runner) similarQuery(ctx context.Context, video, hash string, hashHits []osdb.Subtitle, res *Result) (osdb.Query, bool) {
+	q := osdb.Query{Languages: r.osLangs()}
+	g := osdb.GuessTitle(video)
+	if m := r.movie(ctx, hash, res); m != nil && m.IMDbID > 0 {
+		q.IMDbID = m.IMDbID
+		if m.Series {
+			// NapiProjekt gives the series' IMDb ID for episodes.
+			q.Season, q.Episode = m.Season, m.Episode
+			if q.Episode == 0 {
+				q.Season, q.Episode = g.Season, g.Episode
+			}
+			if q.Episode == 0 {
+				return q, false
+			}
+		}
+		return q, true
+	}
+	for _, s := range hashHits {
+		if s.IMDbID > 0 {
+			q.IMDbID = s.IMDbID // the movie's or the episode's own ID
+			return q, true
+		}
+	}
+	// A bare title is too weak a signal ("Trailer.mkv"): require a year or
+	// an episode number.
+	if g.Title == "" || (g.Year == 0 && g.Episode == 0) {
+		return q, false
+	}
+	q.Text, q.Year, q.Season, q.Episode = g.Title, g.Year, g.Season, g.Episode
+	return q, true
+}
+
+var errNoSyncer = errors.New("sync unavailable")
+
+// syncContent converts downloaded subtitles to SRT, checks their length
+// against the video, aligns them to its audio and writes the result.
+func (r *Runner) syncContent(ctx context.Context, video string, content []byte, lang string, res *Result) error {
+	d, cues, err := toCues(video, content, r.Config.DefaultFPS)
+	if err != nil {
+		return err
+	}
+	if err := plausibleLength(video, cues); err != nil {
+		return err
+	}
+	syncer, err := r.getSyncer(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errNoSyncer, err)
+	}
+	synced, err := r.runSync(ctx, syncer, video, subs.WriteSRT(cues))
+	if err != nil {
+		return fmt.Errorf("sync failed: %w", err)
+	}
+	// Re-render alass's output: it writes LF line endings.
+	if out, err := subs.Parse(synced, subs.SubRip, 0); err == nil {
+		synced = subs.WriteSRT(out)
+	}
+	res.Charset, res.Format, res.Lang = d.charset, d.format, lang
+	res.Output = OutputPath(video, lang, ".srt", r.Config.LangSuffix)
+	return writeAtomic(res.Output, subs.Encode(synced, r.Config.Encoding))
+}
+
+// SyncSubtitles aligns subtitles obtained elsewhere (a napiprojekt: link,
+// a file) to video and saves them next to it.
+func (r *Runner) SyncSubtitles(ctx context.Context, video string, content []byte, lang string, src Source, release string) Result {
+	res := Result{Video: video, Source: src, Release: release}
+	return r.finish(res, r.syncContent(ctx, video, content, lang, &res))
+}
+
+// plausibleLength rejects subtitles that cannot belong to the video, such as
+// another episode or a much longer cut: the last line must fall within the
+// video (allowing for a 25 vs 23.976 fps speed-up) and reach past its middle.
+func plausibleLength(video string, cues []subs.Cue) error {
+	dur, err := media.Duration(video)
+	if err != nil || dur <= 0 || len(cues) == 0 {
+		return nil // unknown: let the sync decide
+	}
+	last := cues[len(cues)-1].End
+	for _, c := range cues {
+		last = max(last, c.End)
+	}
+	if last > dur*106/100+90*time.Second || last < dur/2 {
+		return fmt.Errorf("length %s does not fit the video (%s)", clock(last), clock(dur))
+	}
+	return nil
+}
+
+func clock(d time.Duration) string {
+	s := int(d.Seconds())
+	return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
 }
 
 // movie looks up, once per video, the movie NapiProjekt associates with hash.
@@ -484,12 +551,12 @@ func (r *Runner) runSync(ctx context.Context, s Syncer, video, srt string) (stri
 
 type decoded struct{ charset, format string }
 
-// toSRT decodes downloaded subtitles and converts them to SubRip text.
-func toSRT(video string, content []byte, defaultFPS float64) (decoded, string, error) {
+// toCues decodes downloaded subtitles and parses them into cues.
+func toCues(video string, content []byte, defaultFPS float64) (decoded, []subs.Cue, error) {
 	text, charset := subs.Decode(content)
 	d := decoded{charset: charset, format: subs.Detect(text)}
 	if d.format == subs.Unknown {
-		return d, "", errors.New("unknown subtitle format")
+		return d, nil, errors.New("unknown subtitle format")
 	}
 	fps := 0.0
 	if d.format == subs.MicroDVD {
@@ -502,10 +569,7 @@ func toSRT(video string, content []byte, defaultFPS float64) (decoded, string, e
 		}
 	}
 	cues, err := subs.Parse(text, d.format, fps)
-	if err != nil {
-		return d, "", err
-	}
-	return d, subs.WriteSRT(cues), nil
+	return d, cues, err
 }
 
 // download calls the NapiProjekt API, spacing requests and retrying
@@ -662,7 +726,7 @@ func Summarize(results []Result) Summary {
 		switch r.Status {
 		case Downloaded:
 			s.Downloaded++
-			if r.Source == FromOSSynced {
+			if r.Source == FromOSSynced || r.Source == FromNapiOther {
 				s.Synced++
 			}
 		case NotFound:
@@ -686,4 +750,53 @@ func (s Summary) ExitCode() int {
 		return 2
 	}
 	return 0
+}
+
+// Candidates lists what the OpenSubtitles fallback would try for video, best
+// first, without downloading: exact hash matches, then other releases.
+func (r *Runner) Candidates(ctx context.Context, video string) (osdb.Query, *napi.Movie, []osdb.Subtitle, error) {
+	if r.OS == nil {
+		return osdb.Query{}, nil, nil, errors.New("OpenSubtitles is not configured")
+	}
+	hash, err := napi.FileHash(video)
+	if err != nil {
+		return osdb.Query{}, nil, nil, err
+	}
+	var res Result
+	hits := r.osSearchHash(ctx, video, &res)
+	q, ok := r.similarQuery(ctx, video, hash, hits, &res)
+	var cands []osdb.Subtitle
+	for _, s := range hits {
+		if s.MovieHashMatch {
+			cands = append(cands, s)
+		}
+	}
+	if ok {
+		more, err := r.osSearch(ctx, q)
+		if err != nil {
+			return q, res.movie, nil, err
+		}
+		if q.IMDbID == 0 {
+			more = osdb.SameTitle(more, q.Text)
+		}
+		cands = append(cands, more...)
+	}
+	fps, _, _ := media.FrameRate(video)
+	ranked := osdb.Rank(dedupeSubs(cands), filepath.Base(video), fps, r.osLangs())
+	if res.Warning != "" && len(ranked) == 0 {
+		err = errors.New(res.Warning)
+	}
+	return q, res.movie, ranked, err
+}
+
+func dedupeSubs(in []osdb.Subtitle) []osdb.Subtitle {
+	seen := map[string]bool{}
+	var out []osdb.Subtitle
+	for _, s := range in {
+		if !seen[s.ID] {
+			seen[s.ID] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
