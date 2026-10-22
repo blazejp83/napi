@@ -45,6 +45,7 @@ type App struct {
 	mu      sync.Mutex
 	state   PanelState
 	started bool
+	answer  chan string // pending question on the card
 }
 
 // RunPanel shows the corner card and runs job, which reports through

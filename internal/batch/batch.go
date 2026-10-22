@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -243,11 +244,9 @@ dispatch:
 
 func (r *Runner) process(ctx context.Context, video string) Result {
 	res := Result{Video: video}
-	if !r.Config.Overwrite {
-		if existing := ExistingSubtitles(video); existing != "" {
-			res.Status, res.Output = Skipped, existing
-			return res
-		}
+	if ex := r.existing(video, r.Config.Languages[0]); len(ex) > 0 && !r.Config.Overwrite {
+		res.Status, res.Output, res.Lang = Skipped, ex[0], r.Config.Languages[0]
+		return res
 	}
 	r.step(video, StepHash)
 	hash, err := napi.FileHash(video)
@@ -257,7 +256,15 @@ func (r *Runner) process(ctx context.Context, video string) Result {
 	}
 	var osHits []osdb.Subtitle
 	osSearched := false
-	for _, lang := range r.Config.Languages {
+	for i, lang := range r.Config.Languages {
+		// A fallback language that is already there ends the search: PL was
+		// not found and the ENG subtitles next to the video stay.
+		if i > 0 && !r.Config.Overwrite {
+			if ex := r.existing(video, lang); len(ex) > 0 {
+				res.Status, res.Output, res.Lang = Skipped, ex[0], lang
+				return res
+			}
+		}
 		r.step(video, StepNapi)
 		sub, err := r.download(ctx, hash, lang)
 		if err == nil {
@@ -502,8 +509,8 @@ func (r *Runner) syncContent(ctx context.Context, video string, content []byte, 
 		synced = subs.WriteSRT(out)
 	}
 	res.Charset, res.Format, res.Lang = d.charset, d.format, lang
-	res.Output = OutputPath(video, lang, ".srt", r.Config.LangSuffix)
-	return writeAtomic(res.Output, subs.Encode(synced, r.Config.Encoding))
+	res.Output = OutputPath(video, lang, ".srt", r.Config.Naming)
+	return r.writeSubs(video, lang, res.Output, subs.Encode(synced, r.Config.Encoding))
 }
 
 // SyncSubtitles aligns subtitles obtained elsewhere (a napiprojekt: link,
@@ -668,9 +675,9 @@ func (r *Runner) save(video string, content []byte, lang string, res *Result) er
 			res.Warning = fmt.Sprintf("kept original format: %v", err)
 		}
 	}
-	out := OutputPath(video, lang, ext, r.Config.LangSuffix)
+	out := OutputPath(video, lang, ext, r.Config.Naming)
 	res.Output = out
-	return writeAtomic(out, subs.Encode(text, r.Config.Encoding))
+	return r.writeSubs(video, lang, out, subs.Encode(text, r.Config.Encoding))
 }
 
 func (r *Runner) frameRate(video, text string, res *Result) float64 {
@@ -687,41 +694,110 @@ func (r *Runner) frameRate(video, text string, res *Result) float64 {
 	return r.Config.DefaultFPS
 }
 
-// OutputPath is video's name with the subtitle extension, optionally with a
-// language suffix (movie.pl.srt).
-func OutputPath(video, lang, ext string, langSuffix bool) string {
+// Language codes for file names and for recognising existing files.
+var (
+	langISO3 = map[string]string{"PL": "pol", "ENG": "eng"}
+	langISO2 = map[string]string{"PL": "pl", "ENG": "en"}
+	langTags = map[string][]string{"PL": {"pl", "pol", "polish", "polski"}, "ENG": {"en", "eng", "english"}}
+)
+
+// OutputPath is the subtitle file for video: Film.pol.srt with ISO 639-2
+// naming, Film.pl.srt with ISO 639-1, Film.srt with none.
+func OutputPath(video, lang, ext, naming string) string {
 	base := strings.TrimSuffix(video, filepath.Ext(video))
-	if langSuffix {
-		code := "pl"
-		if lang == "ENG" {
-			code = "en"
-		}
-		base += "." + code
+	switch naming {
+	case config.NamingNone:
+	case config.NamingISO2:
+		base += "." + langISO2[lang]
+	default:
+		base += "." + langISO3[lang]
 	}
 	return base + ext
 }
 
-// ExistingSubtitles returns a subtitle file that already belongs to video
-// (movie.srt, movie.txt, movie.pl.srt, ...), or "".
-func ExistingSubtitles(video string) string {
+func (r *Runner) existing(video, lang string) []string {
+	return ExistingFor(video, lang, lang == r.Config.Languages[0])
+}
+
+// ExistingFor lists subtitle files next to video in language lang: tagged
+// ones (Film.pl.srt, Film.pol.srt, Film.polish.srt) and untagged ones
+// (Film.srt) whose text is in that language. Untagged files whose language
+// cannot be recognised count for the primary language only.
+func ExistingFor(video, lang string, primary bool) []string {
 	dir := filepath.Dir(video)
 	base := strings.ToLower(strings.TrimSuffix(filepath.Base(video), filepath.Ext(video)))
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return ""
+		return nil
 	}
+	var out []string
 	for _, e := range entries {
 		name := strings.ToLower(e.Name())
 		ext := filepath.Ext(name)
 		if e.IsDir() || !subtitleExts[ext] || !strings.HasPrefix(name, base+".") {
 			continue
 		}
-		// Allow a short tag between the name and extension: .pl, .eng, .forced
-		if middle := strings.TrimSuffix(name[len(base):], ext); len(middle) <= 7 {
-			return filepath.Join(dir, e.Name())
+		path := filepath.Join(dir, e.Name())
+		tags := strings.FieldsFunc(strings.TrimSuffix(name[len(base):], ext), func(r rune) bool {
+			return r == '.' || r == '-' || r == '_' || r == ' '
+		})
+		switch tagLang(tags) {
+		case lang:
+			out = append(out, path)
+		case "":
+			// No language in the name (Film.srt, Film.forced.srt): read it.
+			if l := fileLanguage(path); l == lang || (l == "" && primary) {
+				out = append(out, path)
+			}
+		}
+	}
+	return out
+}
+
+func tagLang(tags []string) string {
+	for _, t := range tags {
+		for lang, codes := range langTags {
+			for _, c := range codes {
+				if t == c {
+					return lang
+				}
+			}
 		}
 	}
 	return ""
+}
+
+func fileLanguage(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	buf := make([]byte, 256<<10)
+	n, _ := io.ReadFull(f, buf)
+	text, _ := subs.Decode(buf[:n])
+	return subs.DetectLanguage(text)
+}
+
+// writeSubs writes new subtitles for video, first moving any existing ones
+// in the same language (and the target file) aside as <name>.bak.
+func (r *Runner) writeSubs(video, lang, out string, data []byte) error {
+	old := r.existing(video, lang)
+	if _, err := os.Stat(out); err == nil {
+		old = append(old, out)
+	}
+	seen := map[string]bool{}
+	for _, p := range old {
+		if seen[strings.ToLower(p)] {
+			continue
+		}
+		seen[strings.ToLower(p)] = true
+		os.Remove(p + ".bak")
+		if err := os.Rename(p, p+".bak"); err != nil {
+			return fmt.Errorf("backing up %s: %w", filepath.Base(p), err)
+		}
+	}
+	return writeAtomic(out, data)
 }
 
 func writeAtomic(path string, data []byte) error {

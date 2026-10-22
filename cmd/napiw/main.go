@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/blaze/napi/internal/app"
@@ -23,8 +24,21 @@ const queueFlag = "--queue"
 func main() {
 	cfg, _, cfgErr := config.Load()
 	args := os.Args[1:]
-	if len(args) == 0 {
+	// After an update, bring the Explorer entries up to date.
+	if exe, err := os.Executable(); err == nil {
+		if err := winui.RefreshMenu(exe, cfg.Extensions); err != nil {
+			app.LogError("menu refresh", err)
+		}
+	}
+	lang := ""
+	if len(args) > 0 && strings.HasPrefix(args[0], "--lang=") {
+		lang, args = strings.ToUpper(strings.TrimPrefix(args[0], "--lang=")), args[1:]
+	}
+	if len(args) == 0 && lang == "" {
 		fail(gui.RunSettings(cfg))
+		return
+	}
+	if len(args) == 0 {
 		return
 	}
 	if cfgErr != nil {
@@ -45,8 +59,8 @@ func main() {
 	runtime.LockOSThread()
 	q := winui.NewQueue()
 	if args[0] != queueFlag {
-		if err := q.Add(args); err != nil {
-			fail(gui.RunPanel(cfg, gui.BatchJob(args, func() []string { return nil })))
+		if err := q.Add(lang, args); err != nil {
+			fail(gui.RunPanel(cfg, gui.BatchJob([]winui.Group{{Lang: lang, Paths: args}}, func() []winui.Group { return nil })))
 			return
 		}
 	}
@@ -54,9 +68,9 @@ func main() {
 	if err != nil || !lock.TryLock() {
 		return
 	}
-	paths := q.Drain(400*time.Millisecond, 3*time.Second)
-	if len(paths) > 0 {
-		fail(gui.RunPanel(cfg, gui.BatchJob(paths, func() []string { return q.Drain(0, 0) })))
+	groups := q.Drain(400*time.Millisecond, 3*time.Second)
+	if len(groups) > 0 {
+		fail(gui.RunPanel(cfg, gui.BatchJob(groups, func() []winui.Group { return q.Drain(0, 0) })))
 	}
 	lock.Unlock()
 	// A launch that queued after the last drain saw the lock held and exited;

@@ -16,6 +16,13 @@ import (
 
 const FileName = "napi.json"
 
+// Naming styles.
+const (
+	NamingISO3 = "iso639-2"
+	NamingISO2 = "iso639-1"
+	NamingNone = "none"
+)
+
 type Config struct {
 	// Languages to try in order, e.g. ["PL", "ENG"].
 	Languages []string `json:"languages"`
@@ -23,8 +30,9 @@ type Config struct {
 	Format string `json:"format"`
 	// Encoding of written files: "utf8bom", "utf8" or "cp1250".
 	Encoding string `json:"encoding"`
-	// LangSuffix names files movie.pl.srt instead of movie.srt.
-	LangSuffix bool `json:"langSuffix"`
+	// Naming is how subtitle files are named: "iso639-2" (Film.pol.srt,
+	// Film.eng.srt), "iso639-1" (Film.pl.srt) or "none" (Film.srt).
+	Naming string `json:"naming"`
 	// Overwrite replaces existing subtitles instead of skipping the video.
 	Overwrite bool `json:"overwrite"`
 	// Recursive descends into subfolders of the given folders.
@@ -63,6 +71,7 @@ func Default() Config {
 		Languages:  []string{"PL"},
 		Format:     "srt",
 		Encoding:   subs.EncUTF8BOM,
+		Naming:     NamingISO3,
 		Recursive:  true,
 		Jobs:       4,
 		DefaultFPS: 23.976,
@@ -143,6 +152,13 @@ func (c *Config) Validate() error {
 	c.Encoding = strings.ToLower(strings.ReplaceAll(c.Encoding, "-", ""))
 	if !subs.ValidEncoding(c.Encoding) {
 		return fmt.Errorf("unsupported encoding %q (use utf8bom, utf8 or cp1250)", c.Encoding)
+	}
+	switch c.Naming {
+	case "":
+		c.Naming = NamingISO3
+	case NamingISO3, NamingISO2, NamingNone:
+	default:
+		return fmt.Errorf("unsupported naming %q (use iso639-2, iso639-1 or none)", c.Naming)
 	}
 	if c.Jobs < 1 {
 		c.Jobs = 1

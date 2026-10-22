@@ -15,10 +15,19 @@ import (
 )
 
 const (
-	verbKey   = `napi`
-	menuLabel = "Pobierz napisy (NapiProjekt)"
-	classes   = `Software\Classes`
+	verbKey = `napi`
+	classes = `Software\Classes`
+	// menuSchema changes whenever the registered entries change, so an
+	// updated napiw re-registers itself (see RefreshMenu).
+	menuSchema = "2"
+	stateKey   = `Software\napi`
 )
+
+// verbs are the Explorer menu entries: key name, label, extra arguments.
+var verbs = []struct{ key, label, args string }{
+	{verbKey, "Pobierz napisy", ""},
+	{verbKey + "-eng", "Pobierz napisy (eng)", "--lang=ENG "},
+}
 
 // MenuExecutable is the program the menu runs: napiw.exe next to the current
 // executable (no console window), or the current executable itself.
@@ -93,27 +102,53 @@ func InstallMenu(exe string, exts []string) error {
 		if parent == `Directory\Background` {
 			arg = "%V"
 		}
-		base := classes + `\` + parent + `\shell\` + verbKey
-		k, _, err := registry.CreateKey(registry.CURRENT_USER, base, registry.SET_VALUE)
-		if err != nil {
-			return fmt.Errorf("%s: %w", base, err)
-		}
-		k.SetStringValue("", menuLabel)
-		k.SetStringValue("Icon", exe)
-		// "Player" lets Explorer pass large selections instead of capping at 15.
-		k.SetStringValue("MultiSelectModel", "Player")
-		k.Close()
-		c, _, err := registry.CreateKey(registry.CURRENT_USER, base+`\command`, registry.SET_VALUE)
-		if err != nil {
-			return fmt.Errorf("%s: %w", base, err)
-		}
-		err = c.SetStringValue("", fmt.Sprintf(`"%s" "%s"`, exe, arg))
-		c.Close()
-		if err != nil {
-			return err
+		for _, v := range verbs {
+			base := classes + `\` + parent + `\shell\` + v.key
+			k, _, err := registry.CreateKey(registry.CURRENT_USER, base, registry.SET_VALUE)
+			if err != nil {
+				return fmt.Errorf("%s: %w", base, err)
+			}
+			k.SetStringValue("", v.label)
+			k.SetStringValue("Icon", exe)
+			// "Player" lets Explorer pass large selections instead of capping at 15.
+			k.SetStringValue("MultiSelectModel", "Player")
+			k.Close()
+			c, _, err := registry.CreateKey(registry.CURRENT_USER, base+`\command`, registry.SET_VALUE)
+			if err != nil {
+				return fmt.Errorf("%s: %w", base, err)
+			}
+			err = c.SetStringValue("", fmt.Sprintf(`"%s" %s"%s"`, exe, v.args, arg))
+			c.Close()
+			if err != nil {
+				return err
+			}
 		}
 	}
+	if k, _, err := registry.CreateKey(registry.CURRENT_USER, stateKey, registry.SET_VALUE); err == nil {
+		k.SetStringValue("MenuSchema", menuSchema)
+		k.SetStringValue("MenuExe", exe)
+		k.Close()
+	}
 	return nil
+}
+
+// RefreshMenu re-registers the menu when it is installed but was written by
+// an older napiw (different entries) or points at another exe.
+func RefreshMenu(exe string, exts []string) error {
+	if !MenuInstalled() {
+		return nil
+	}
+	k, err := registry.OpenKey(registry.CURRENT_USER, stateKey, registry.QUERY_VALUE)
+	if err == nil {
+		schema, _, _ := k.GetStringValue("MenuSchema")
+		at, _, _ := k.GetStringValue("MenuExe")
+		k.Close()
+		if schema == menuSchema && strings.EqualFold(at, exe) {
+			return nil
+		}
+	}
+	UninstallMenu()
+	return InstallMenu(exe, exts)
 }
 
 // UninstallMenu removes every verb InstallMenu may have created and the
@@ -133,13 +168,16 @@ func UninstallMenu() error {
 	}
 	parents = append(parents, verbParents(nil)...)
 	for _, parent := range parents {
-		base := classes + `\` + parent + `\shell\` + verbKey
-		for _, k := range []string{base + `\command`, base} {
-			if err := registry.DeleteKey(registry.CURRENT_USER, k); err != nil && !errors.Is(err, registry.ErrNotExist) {
-				return fmt.Errorf("%s: %w", k, err)
+		for _, v := range verbs {
+			base := classes + `\` + parent + `\shell\` + v.key
+			for _, k := range []string{base + `\command`, base} {
+				if err := registry.DeleteKey(registry.CURRENT_USER, k); err != nil && !errors.Is(err, registry.ErrNotExist) {
+					return fmt.Errorf("%s: %w", k, err)
+				}
 			}
 		}
 	}
+	registry.DeleteKey(registry.CURRENT_USER, stateKey)
 	return nil
 }
 

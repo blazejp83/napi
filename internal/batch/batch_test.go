@@ -117,13 +117,13 @@ func TestRun(t *testing.T) {
 	if f.FPS != 25 || f.FPSFrom != "mkv" || f.Charset != "windows-1250" {
 		t.Errorf("Framed.mkv: fps %v from %s, charset %s", f.FPS, f.FPSFrom, f.Charset)
 	}
-	out, _ := os.ReadFile(filepath.Join(dir, "c", "Framed.srt"))
+	out, _ := os.ReadFile(filepath.Join(dir, "c", "Framed.pol.srt"))
 	want, _ := charmap.Windows1250.NewEncoder().String("1\r\n00:00:01,000 --> 00:00:02,000\r\nZażółć\r\ngęślą\r\n\r\n")
 	if string(out) != want {
-		t.Errorf("Framed.srt = %q, want %q", out, want)
+		t.Errorf("Framed.pol.srt = %q, want %q", out, want)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "a", "Film.PL.srt")); err != nil {
-		t.Errorf("Film.PL.srt not written: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "a", "Film.PL.pol.srt")); err != nil {
+		t.Errorf("Film.PL.pol.srt not written: %v", err)
 	}
 	if old, _ := os.ReadFile(filepath.Join(dir, "b", "Done.pl.srt")); string(old) != "old" {
 		t.Error("existing subtitles were overwritten")
@@ -139,10 +139,93 @@ func TestRun(t *testing.T) {
 }
 
 func TestOutputPath(t *testing.T) {
-	if got := OutputPath(filepath.FromSlash("/x/Film.mkv"), "ENG", ".srt", true); got != filepath.FromSlash("/x/Film.en.srt") {
-		t.Fatal(got)
+	for _, tc := range []struct{ lang, ext, naming, want string }{
+		{"PL", ".srt", "iso639-2", "/x/Film.pol.srt"},
+		{"ENG", ".srt", "iso639-2", "/x/Film.eng.srt"},
+		{"ENG", ".srt", "iso639-1", "/x/Film.en.srt"},
+		{"PL", ".txt", "none", "/x/Film.txt"},
+	} {
+		if got := OutputPath(filepath.FromSlash("/x/Film.mkv"), tc.lang, tc.ext, tc.naming); got != filepath.FromSlash(tc.want) {
+			t.Errorf("%+v: got %s", tc, got)
+		}
 	}
-	if got := OutputPath(filepath.FromSlash("/x/Film.2020.mkv"), "PL", ".txt", false); got != filepath.FromSlash("/x/Film.2020.txt") {
-		t.Fatal(got)
+}
+
+func TestExistingFor(t *testing.T) {
+	dir := t.TempDir()
+	v := write(t, filepath.Join(dir, "Film.mkv"), "v")
+	pl := strings.Repeat("1\n00:00:01,000 --> 00:00:02,000\nNie wiem, czy to jest dobry pomysł.\n\n", 10)
+	en := strings.Repeat("1\n00:00:01,000 --> 00:00:02,000\nI don't know what you want from me.\n\n", 10)
+	write(t, filepath.Join(dir, "Film.srt"), en) // untagged, English text
+	write(t, filepath.Join(dir, "Film.PL.srt"), pl)
+	write(t, filepath.Join(dir, "Film.forced.txt"), "1\n00:00:01,000 --> 00:00:02,000\n?\n")
+	write(t, filepath.Join(dir, "Film.pol.srt.bak"), pl)
+	write(t, filepath.Join(dir, "Other.pol.srt"), pl)
+	names := func(ps []string) string {
+		var n []string
+		for _, p := range ps {
+			n = append(n, filepath.Base(p))
+		}
+		return strings.Join(n, ",")
+	}
+	if got := names(ExistingFor(v, "PL", true)); got != "Film.PL.srt,Film.forced.txt" {
+		t.Errorf("PL: %s", got)
+	}
+	if got := names(ExistingFor(v, "ENG", false)); got != "Film.srt" {
+		t.Errorf("ENG: %s", got)
+	}
+}
+
+func TestReplaceKeepsBackup(t *testing.T) {
+	dir := t.TempDir()
+	v := write(t, filepath.Join(dir, "Film.mkv"), "video replace")
+	write(t, filepath.Join(dir, "Film.pl.srt"), "old pl")
+	write(t, filepath.Join(dir, "Film.eng.srt"), "english stays")
+	srt := "1\r\n00:00:01,000 --> 00:00:02,000\r\nNowe\r\n"
+	cfg := config.Default()
+	cfg.Encoding = "utf8"
+	run := func(overwrite bool) Result {
+		cfg.Overwrite = overwrite
+		r := &Runner{Config: cfg, Client: &fakeAPI{subs: map[string]string{hashOf(t, v) + "/PL": srt}}}
+		return r.Run(context.Background(), []string{v})[0]
+	}
+	if res := run(false); res.Status != Skipped || filepath.Base(res.Output) != "Film.pl.srt" {
+		t.Fatalf("without overwrite: %+v", res)
+	}
+	if res := run(true); res.Status != Downloaded || filepath.Base(res.Output) != "Film.pol.srt" {
+		t.Fatalf("with overwrite: %+v", res)
+	}
+	read := func(n string) string { b, _ := os.ReadFile(filepath.Join(dir, n)); return string(b) }
+	if read("Film.pl.srt.bak") != "old pl" || read("Film.eng.srt") != "english stays" || !strings.Contains(read("Film.pol.srt"), "Nowe") {
+		t.Fatalf("files: bak=%q eng=%q new=%q", read("Film.pl.srt.bak"), read("Film.eng.srt"), read("Film.pol.srt"))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Film.pl.srt")); err == nil {
+		t.Fatal("old Polish subtitles left in place next to the new ones")
+	}
+}
+
+func TestEnglishOnlyIgnoresPolish(t *testing.T) {
+	dir := t.TempDir()
+	v := write(t, filepath.Join(dir, "Film.mkv"), "video eng only")
+	write(t, filepath.Join(dir, "Film.pol.srt"), "polskie")
+	cfg := config.Default()
+	cfg.Languages = []string{"ENG"}
+	r := &Runner{Config: cfg, Client: &fakeAPI{subs: map[string]string{hashOf(t, v) + "/ENG": "[10][20]Hello"}}}
+	res := r.Run(context.Background(), []string{v})[0]
+	if res.Status != Downloaded || filepath.Base(res.Output) != "Film.eng.srt" {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestFallbackLanguageAlreadyThere(t *testing.T) {
+	dir := t.TempDir()
+	v := write(t, filepath.Join(dir, "Film.mkv"), "video fallback")
+	write(t, filepath.Join(dir, "Film.eng.srt"), "english")
+	cfg := config.Default()
+	cfg.Languages = []string{"PL", "ENG"}
+	api := &fakeAPI{}
+	res := (&Runner{Config: cfg, Client: api}).Run(context.Background(), []string{v})[0]
+	if res.Status != Skipped || res.Lang != "ENG" || len(api.calls) != 1 {
+		t.Fatalf("%+v calls %v", res, api.calls)
 	}
 }

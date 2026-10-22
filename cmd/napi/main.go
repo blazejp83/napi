@@ -66,7 +66,8 @@ func rootCmd() *cobra.Command {
 type getFlags struct {
 	langs              string
 	format, encoding   string
-	suffix, force      bool
+	naming             string
+	force              bool
 	noRecursive, quiet bool
 	jobs               int
 	fps                float64
@@ -96,8 +97,8 @@ func getCmd() *cobra.Command {
 			if fl.Changed("encoding") {
 				cfg.Encoding = f.encoding
 			}
-			if fl.Changed("suffix") {
-				cfg.LangSuffix = f.suffix
+			if fl.Changed("naming") {
+				cfg.Naming = f.naming
 			}
 			if fl.Changed("force") {
 				cfg.Overwrite = f.force
@@ -121,8 +122,8 @@ func getCmd() *cobra.Command {
 	fl.StringVarP(&f.langs, "lang", "l", "PL", "languages to try in order: PL, ENG or PL,ENG")
 	fl.StringVar(&f.format, "format", "srt", "output format: srt (convert) or original")
 	fl.StringVarP(&f.encoding, "encoding", "e", subs.EncUTF8BOM, "output encoding: utf8bom, utf8 or cp1250")
-	fl.BoolVarP(&f.suffix, "suffix", "s", false, "add a language suffix: movie.pl.srt")
-	fl.BoolVarP(&f.force, "force", "f", false, "overwrite existing subtitles")
+	fl.StringVarP(&f.naming, "naming", "n", config.NamingISO3, "file names: iso639-2 (Film.pol.srt), iso639-1 (Film.pl.srt) or none (Film.srt)")
+	fl.BoolVarP(&f.force, "force", "f", false, "replace existing subtitles in that language (old ones are kept as .bak)")
 	fl.BoolVar(&f.noRecursive, "no-recursive", false, "do not descend into subfolders")
 	fl.IntVarP(&f.jobs, "jobs", "j", 4, "videos processed in parallel")
 	fl.Float64Var(&f.fps, "fps", 23.976, "frame rate for MicroDVD subtitles when the video's cannot be read")
@@ -318,7 +319,7 @@ func menuCmd() *cobra.Command {
 			if err := winui.InstallMenu(exe, cfg.Extensions); err != nil {
 				return err
 			}
-			fmt.Println("Installed. Right-click a video or folder → \"Pobierz napisy\" (Windows 11: Show more options).")
+			fmt.Println("Installed. Right-click a video or folder → \"Pobierz napisy\" or \"Pobierz napisy (eng)\" (Windows 11: Show more options).")
 			fmt.Println("napiprojekt: links on napiprojekt.pl now open napi (for this user; uninstall restores the official app).")
 			fmt.Println("Command:", exe)
 			return nil

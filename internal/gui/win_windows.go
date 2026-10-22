@@ -43,7 +43,7 @@ func styleCorner(hwnd uintptr) {
 	procSetLong.Call(hwnd, gwlStyle, st&^(0x80000|0x20000|0x10000)) // WS_SYSMENU, WS_MINIMIZEBOX, WS_MAXIMIZEBOX
 	const swpNoSize, swpNoMove, swpNoZOrder, swpNoActivate, swpFrameChanged = 0x1, 0x2, 0x4, 0x10, 0x20
 	procSetPos.Call(hwnd, 0, 0, 0, 0, 0, swpNoSize|swpNoMove|swpNoZOrder|swpNoActivate|swpFrameChanged)
-	round := uint32(2)                                     // DWMWCP_ROUND
+	round := uint32(2) // DWMWCP_ROUND
 	procDwmSet.Call(hwnd, 33, uintptr(unsafe.Pointer(&round)), 4)
 }
 

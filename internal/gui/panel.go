@@ -12,8 +12,10 @@ import (
 
 	"github.com/blaze/napi/internal/app"
 	"github.com/blaze/napi/internal/batch"
+	"github.com/blaze/napi/internal/config"
 	"github.com/blaze/napi/internal/napi"
 	"github.com/blaze/napi/internal/pending"
+	"github.com/blaze/napi/internal/winui"
 )
 
 // PanelState is everything the corner card shows.
@@ -32,6 +34,15 @@ type PanelState struct {
 	Output  string       `json:"output"`    // single produced file, for "Pokaż plik"
 	Log     string       `json:"log"`       // CSV report path
 	Close   int          `json:"autoClose"` // seconds until the card closes itself, 0 = stays
+
+	Choices []Choice `json:"choices"` // phase "ask": buttons to answer with
+}
+
+// Choice is one answer button of a question on the card.
+type Choice struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Primary bool   `json:"primary"`
 }
 
 type ResultView struct {
@@ -55,46 +66,143 @@ var stepText = map[batch.Step]string{
 	batch.StepSync:     "Synchronizuję z dźwiękiem filmu",
 }
 
-// BatchJob processes videos and folders from the Explorer menu. more is
-// polled after each round for paths queued by later menu launches.
-func BatchJob(paths []string, more func() []string) func(ctx context.Context, a *App) {
+var langWords = map[string]string{"PL": "polskie", "ENG": "angielskie"}
+
+// BatchJob processes videos and folders from the Explorer menu. Each group
+// carries the language its menu entry asked for; more is polled after each
+// round for groups queued by later menu launches.
+func BatchJob(groups []winui.Group, more func() []winui.Group) func(ctx context.Context, a *App) {
 	return func(ctx context.Context, a *App) {
 		var all []batch.Result
-		for round := 0; len(paths) > 0; round++ {
-			videos, err := batch.Collect(paths, a.cfg)
+		for len(groups) > 0 && ctx.Err() == nil {
+			g := groups[0]
+			groups = groups[1:]
+			cfg := a.cfg
+			if g.Lang != "" {
+				cfg.Languages = []string{g.Lang}
+			}
+			videos, err := batch.Collect(g.Paths, cfg)
 			if err != nil {
 				a.finishError(err.Error())
 				return
 			}
-			if len(videos) == 0 && len(all) == 0 {
-				a.finish(nil, "none", "Nie znaleziono plików wideo.", "")
-				return
+			if !cfg.Overwrite {
+				switch a.askReplace(ctx, videos, cfg.Languages[0]) {
+				case "replace":
+					cfg.Overwrite = true
+				case "cancel":
+					videos = nil
+				}
 			}
-			base := len(all)
-			a.setState(func(s *PanelState) {
-				s.Phase, s.Total, s.Done = "running", base+len(videos), base
-				s.Title, s.Detail, s.Busy = "Szukam napisów…", "", false
-			})
-			r := batch.NewRunner(a.cfg)
-			r.OnStep = func(video string, step batch.Step) {
-				a.setState(func(s *PanelState) {
-					s.Title = stepText[step] + "…"
-					s.Detail = filepath.Base(video)
-					s.Busy = step == batch.StepSync && s.Total == 1
-				})
-			}
-			r.Progress = func(done, total int, res batch.Result) {
-				a.setState(func(s *PanelState) { s.Done = base + done })
-			}
-			all = append(all, r.Run(ctx, videos)...)
 			if ctx.Err() != nil {
 				break
 			}
-			paths = more()
+			all = append(all, a.runRound(ctx, cfg, videos, len(all))...)
+			if len(groups) == 0 && ctx.Err() == nil {
+				groups = more()
+			}
+		}
+		if len(all) == 0 {
+			if ctx.Err() == nil {
+				a.Close() // nothing to do: the user kept the existing subtitles
+			}
+			return
 		}
 		app.Remember(all)
 		a.finishBatch(ctx, all)
 	}
+}
+
+func (a *App) runRound(ctx context.Context, cfg config.Config, videos []string, base int) []batch.Result {
+	if len(videos) == 0 {
+		return nil
+	}
+	a.setState(func(s *PanelState) {
+		s.Phase, s.Total, s.Done, s.Choices = "running", base+len(videos), base, nil
+		s.Title, s.Detail, s.Busy = "Szukam napisów…", "", false
+	})
+	r := batch.NewRunner(cfg)
+	r.OnStep = func(video string, step batch.Step) {
+		a.setState(func(s *PanelState) {
+			s.Title = stepText[step] + "…"
+			s.Detail = filepath.Base(video)
+			s.Busy = step == batch.StepSync && s.Total == 1
+		})
+	}
+	r.Progress = func(done, total int, res batch.Result) {
+		a.setState(func(s *PanelState) { s.Done = base + done })
+	}
+	return r.Run(ctx, videos)
+}
+
+// askReplace asks what to do when some videos already have subtitles in
+// lang: "replace" them (old ones are kept as .bak), "skip" those videos, or
+// "cancel" the round. It returns "skip" when there is nothing to ask.
+func (a *App) askReplace(ctx context.Context, videos []string, lang string) string {
+	var have []string
+	for _, v := range videos {
+		if ex := batch.ExistingFor(v, lang, true); len(ex) > 0 {
+			have = append(have, filepath.Base(ex[0]))
+		}
+	}
+	if len(have) == 0 {
+		return "skip"
+	}
+	words := langWords[lang]
+	keep := " Obecne zachowam jako kopię .bak."
+	switch {
+	case len(videos) == 1:
+		return a.ask(ctx, "Napisy już są", fmt.Sprintf("%s (%s). Pobrać nowe?%s", have[0], words, keep),
+			Choice{"replace", "Pobierz nowe", true}, Choice{"cancel", "Zostaw", false})
+	case len(have) == len(videos):
+		return a.ask(ctx, "Napisy już są", fmt.Sprintf("Wszystkie %s mają już napisy (%s). Pobrać ponownie?%s", filesPL(len(videos)), words, keep),
+			Choice{"replace", "Pobierz ponownie", true}, Choice{"cancel", "Anuluj", false})
+	}
+	return a.ask(ctx, "Część filmów ma już napisy", fmt.Sprintf("%d z %s ma już napisy (%s). Pobrać tylko brakujące?",
+		len(have), filesPL(len(videos)), words),
+		Choice{"skip", "Tylko brakujące", true}, Choice{"replace", "Wszystkie od nowa", false})
+}
+
+// ask shows a question on the card and waits for one of choices.
+func (a *App) ask(ctx context.Context, title, message string, choices ...Choice) string {
+	a.mu.Lock()
+	a.answer = make(chan string, 1)
+	ch := a.answer
+	a.mu.Unlock()
+	a.setState(func(s *PanelState) {
+		s.Phase, s.Title, s.Message, s.Choices, s.Busy = "ask", title, message, choices, false
+	})
+	select {
+	case id := <-ch:
+		return id
+	case <-ctx.Done():
+		return "cancel"
+	}
+}
+
+// Answer delivers the user's choice for the current question.
+func (a *App) Answer(id string) {
+	a.mu.Lock()
+	ch := a.answer
+	a.mu.Unlock()
+	if ch != nil {
+		select {
+		case ch <- id:
+		default:
+		}
+	}
+}
+
+// filesPL formats a Polish count of videos: 1 film, 3 filmy, 5 filmów.
+func filesPL(n int) string {
+	d, t := n%10, n%100
+	switch {
+	case n == 1:
+		return "1 film"
+	case d >= 2 && d <= 4 && (t < 12 || t > 14):
+		return fmt.Sprintf("%d filmy", n)
+	}
+	return fmt.Sprintf("%d filmów", n)
 }
 
 func (a *App) finishBatch(ctx context.Context, results []batch.Result) {
@@ -194,7 +302,7 @@ func (a *App) finish(results []batch.Result, kind, msg, output string) {
 	rank := map[string]int{"error": 0, "not-found": 1, "synced": 2, "ok": 3, "exists": 4}
 	sort.SliceStable(views, func(i, j int) bool { return rank[views[i].Status] < rank[views[j].Status] })
 	a.setState(func(s *PanelState) {
-		s.Phase, s.Kind, s.Message, s.Busy = "done", kind, msg, false
+		s.Phase, s.Kind, s.Message, s.Busy, s.Choices = "done", kind, msg, false, nil
 		s.Title, s.Detail = doneTitle(kind), ""
 		s.Results, s.Pages, s.Output = views, pages, output
 		s.Done = s.Total

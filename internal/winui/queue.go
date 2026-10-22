@@ -15,14 +15,22 @@ type Queue struct{ Dir string }
 
 func NewQueue() *Queue { return &Queue{Dir: filepath.Join(os.TempDir(), "napi-queue")} }
 
+// Group is paths queued by one launch, with the subtitle language its menu
+// entry asked for ("" for the configured languages).
+type Group struct {
+	Lang  string
+	Paths []string
+}
+
 // Add records paths for whichever process handles the queue.
-func (q *Queue) Add(paths []string) error {
+func (q *Queue) Add(lang string, paths []string) error {
 	if err := os.MkdirAll(q.Dir, 0o755); err != nil {
 		return err
 	}
 	name := fmt.Sprintf("%d-%d.path", time.Now().UnixNano(), os.Getpid())
 	tmp := filepath.Join(q.Dir, name+".tmp")
-	if err := os.WriteFile(tmp, []byte(strings.Join(paths, "\n")), 0o644); err != nil {
+	body := "lang=" + lang + "\n" + strings.Join(paths, "\n")
+	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(q.Dir, name))
@@ -37,8 +45,9 @@ func (q *Queue) entries() []string {
 func (q *Queue) Pending() bool { return len(q.entries()) > 0 }
 
 // Drain waits until no new launches arrive for quiet (at most max overall),
-// then removes and returns all queued paths.
-func (q *Queue) Drain(quiet, max time.Duration) []string {
+// then removes and returns all queued paths, grouped by language in the
+// order the languages were first queued.
+func (q *Queue) Drain(quiet, max time.Duration) []Group {
 	deadline := time.Now().Add(max)
 	last, lastChange := -1, time.Now()
 	for time.Now().Before(deadline) {
@@ -50,18 +59,32 @@ func (q *Queue) Drain(quiet, max time.Duration) []string {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	var paths []string
+	var groups []Group
+	index := map[string]int{}
 	for _, e := range q.entries() {
 		b, err := os.ReadFile(e)
 		os.Remove(e)
 		if err != nil {
 			continue
 		}
-		for _, p := range strings.Split(string(b), "\n") {
-			if p = strings.TrimSpace(p); p != "" {
-				paths = append(paths, p)
+		lang := ""
+		for i, p := range strings.Split(string(b), "\n") {
+			p = strings.TrimSpace(p)
+			if i == 0 && strings.HasPrefix(p, "lang=") {
+				lang = strings.TrimPrefix(p, "lang=")
+				continue
 			}
+			if p == "" {
+				continue
+			}
+			gi, ok := index[lang]
+			if !ok {
+				gi = len(groups)
+				index[lang] = gi
+				groups = append(groups, Group{Lang: lang})
+			}
+			groups[gi].Paths = append(groups[gi].Paths, p)
 		}
 	}
-	return paths
+	return groups
 }

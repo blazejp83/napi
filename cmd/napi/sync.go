@@ -46,7 +46,7 @@ func syncCmd() *cobra.Command {
 			} else if content, err = os.ReadFile(src); err != nil {
 				return err
 			}
-			def := batch.OutputPath(video, lang, ".srt", cfg.LangSuffix)
+			def := batch.OutputPath(video, lang, ".srt", cfg.Naming)
 			if out != "" && abs(out) != abs(def) {
 				return errors.New("-o is not supported with the batch naming rules; rename the result instead")
 			}

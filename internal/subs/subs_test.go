@@ -102,3 +102,13 @@ func TestMicroDVDNeedsFPS(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestDetectLanguage(t *testing.T) {
+	pl := strings.Repeat("1\n00:00:01,000 --> 00:00:02,000\nNie wiem, czy to jest dobry pomysł.\n- Już się zgodziłeś!\n\n", 10)
+	en := strings.Repeat("1\n00:00:01,000 --> 00:00:02,000\nI don't know what you want from me.\n- Is that the plan?\n\n", 10)
+	for in, want := range map[string]string{pl: "PL", en: "ENG", "1\n00:00:01,000 --> 00:00:02,000\n...\n": ""} {
+		if got := DetectLanguage(in); got != want {
+			t.Errorf("DetectLanguage(%.40q) = %q, want %q", in, got, want)
+		}
+	}
+}

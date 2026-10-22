@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/blaze/napi/internal/batch"
 	"github.com/blaze/napi/internal/napi"
@@ -126,4 +127,21 @@ func WriteRunLog(results []batch.Result) string {
 		return ""
 	}
 	return p
+}
+
+// LogError appends a line to %LOCALAPPDATA%\napi\napi.log, for failures
+// the windowless front end has nowhere else to report.
+func LogError(what string, err error) {
+	dir, e := os.UserCacheDir()
+	if e != nil {
+		return
+	}
+	p := filepath.Join(dir, "napi", "napi.log")
+	os.MkdirAll(filepath.Dir(p), 0o755)
+	f, e := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if e != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %s: %v\n", time.Now().Format(time.RFC3339), what, err)
 }

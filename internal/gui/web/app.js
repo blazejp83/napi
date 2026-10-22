@@ -39,15 +39,17 @@ function render(s) {
   lastState = s;
   const panel = $("panel");
   const done = s.phase === "done";
-  panel.classList.toggle("done", done);
+  const asking = s.phase === "ask";
+  panel.classList.toggle("done", done || asking);
   $("p-title").textContent = s.title || "";
-  $("p-detail").textContent = done ? s.message || "" : s.detail || "";
+  $("p-detail").textContent = done || asking ? s.message || "" : s.detail || "";
 
   const icon = $("p-icon");
-  icon.toggleAttribute("hidden", !done);
-  if (done) {
-    icon.setAttribute("class", "status " + s.kind);
-    icon.firstElementChild.setAttribute("href", "#" + (icons[s.kind] || "i-info"));
+  icon.toggleAttribute("hidden", !done && !asking);
+  if (done || asking) {
+    const kind = asking ? "none" : s.kind;
+    icon.setAttribute("class", "status " + kind);
+    icon.firstElementChild.setAttribute("href", "#" + (icons[kind] || "i-info"));
   }
 
   const bar = $("p-progress");
@@ -63,7 +65,10 @@ function render(s) {
     b.onclick = fn;
     buttons.append(b);
   };
-  if (!done) {
+  if (asking) {
+    $("p-count").textContent = "";
+    for (const c of s.choices || []) add(c.label, () => api().Answer(c.id), c.primary);
+  } else if (!done) {
     add("Anuluj", () => api().Cancel());
   } else {
     const pages = s.pages || [];
@@ -188,7 +193,7 @@ function fill(s) {
   $("s-langs").value = [...$("s-langs").options].some((o) => o.value === langs) ? langs : "PL";
   $("s-format").value = c.format;
   $("s-encoding").value = c.encoding;
-  $("s-suffix").checked = c.langSuffix;
+  $("s-naming").value = c.naming;
   $("s-overwrite").checked = c.overwrite;
   $("s-recursive").checked = c.recursive;
   $("s-sync").checked = c.sync;
@@ -206,7 +211,7 @@ function collect() {
   c.languages = $("s-langs").value.split(",");
   c.format = $("s-format").value;
   c.encoding = $("s-encoding").value;
-  c.langSuffix = $("s-suffix").checked;
+  c.naming = $("s-naming").value;
   c.overwrite = $("s-overwrite").checked;
   c.recursive = $("s-recursive").checked;
   c.sync = $("s-sync").checked;

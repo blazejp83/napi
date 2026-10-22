@@ -60,8 +60,9 @@
       <select id="s-format"><option value="srt">Zawsze SRT</option><option value="original">Jak na serwerze</option></select></label>
     <label class="row"><span>Kodowanie znaków<small>CP1250 tylko dla starych telewizorów</small></span>
       <select id="s-encoding"><option value="utf8bom">UTF-8 (z BOM)</option><option value="utf8">UTF-8</option><option value="cp1250">Windows-1250</option></select></label>
-    <label class="row"><span>Kod języka w nazwie<small>Film.pl.srt zamiast Film.srt</small></span><input type="checkbox" class="switch" id="s-suffix"></label>
-    <label class="row"><span>Nadpisuj istniejące napisy<small>Inaczej pomijam filmy, które już je mają</small></span><input type="checkbox" class="switch" id="s-overwrite"></label>
+    <label class="row"><span>Nazwa pliku z napisami<small>Kod języka pozwala trzymać obok siebie napisy PL i ENG</small></span>
+      <select id="s-naming"><option value="iso639-2">Film.pol.srt / Film.eng.srt</option><option value="iso639-1">Film.pl.srt / Film.en.srt</option><option value="none">Film.srt</option></select></label>
+    <label class="row"><span>Zastępuj istniejące napisy bez pytania<small>Inaczej pytam; stare zostają jako kopia .bak</small></span><input type="checkbox" class="switch" id="s-overwrite"></label>
     <label class="row"><span>Przeszukuj podfoldery</span><input type="checkbox" class="switch" id="s-recursive"></label>
   </section>
 

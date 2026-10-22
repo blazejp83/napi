@@ -119,7 +119,7 @@ func TestFallbackToOpenSubtitles(t *testing.T) {
 	if s.Status != Downloaded || s.Source != FromOSSynced || s.Release != "Movie.2007.1080p.BluRay.x264" {
 		t.Errorf("Similar: %+v", s)
 	}
-	out, _ := os.ReadFile(filepath.Join(dir, "Movie.2007.1080p.BluRay.x265-GRP.srt"))
+	out, _ := os.ReadFile(filepath.Join(dir, "Movie.2007.1080p.BluRay.x265-GRP.pol.srt"))
 	if !strings.Contains(string(out), "00:00:03,500") {
 		t.Errorf("synced output not written: %q", out)
 	}

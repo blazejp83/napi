@@ -2,11 +2,17 @@
 
 Downloads Polish (and English) subtitles from [napiprojekt.pl](https://napiprojekt.pl) for video files and whole folder trees. Windows-first, a single portable exe, no installer.
 
-- **Explorer menu:** right-click a video, several videos, a folder or a folder background → *Pobierz napisy (NapiProjekt)*. Progress shows in a card in the bottom-right corner (current step and file, overall progress, *Anuluj*); when done it shows the result with actions (*Pokaż plik*, *Otwórz stronę filmu*, *Szczegóły* with a per-file list) and closes itself after a clean success.
+- **Explorer menu:** right-click a video, several videos, a folder or a folder background → *Pobierz napisy* (configured languages, Polish by default) or *Pobierz napisy (eng)* (English only, from both NapiProjekt and OpenSubtitles). Progress shows in a card in the bottom-right corner (current step and file, overall progress, *Anuluj*); when done it shows the result with actions (*Pokaż plik*, *Otwórz stronę filmu*, *Szczegóły* with a per-file list) and closes itself after a clean success.
 - **Drag and drop** videos or folders onto `napiw.exe`.
 - **Settings window:** start `napiw.exe` on its own: languages, format, encoding, naming, OpenSubtitles login with a connection test, the Explorer menu switch.
 - **CLI** for batch jobs and scripts: `napi get D:\Filmy E:\Seriale`.
 - **Fallback to OpenSubtitles**, including subtitles made for *another release* of the same movie, automatically synced to your file's audio.
+
+## Existing subtitles
+
+Subtitles are named with the language (`Film.pol.srt`, `Film.eng.srt` by default), so Polish and English ones live side by side. Existing files count per language: `Film.pl.srt`, `Film.pol.srt`, `Film.polish.srt` … are Polish; for files without a language in the name (`Film.srt`) napi reads the text and recognises Polish or English (unrecognisable ones count as the first configured language). English subtitles are never blocked by Polish ones and vice versa.
+
+From the Explorer menu, when a video already has subtitles in the requested language the card asks first – for one film *Pobierz nowe* / *Zostaw*, for a batch *Tylko brakujące* / *Wszystkie od nowa*. Replaced files (all existing ones in that language) are renamed to `<name>.bak`. The command line skips such videos unless given `--force`; `"overwrite": true` in the settings replaces without asking.
 
 ## Where subtitles come from
 
@@ -71,8 +77,8 @@ napi config init [--portable]         # write napi.json (portable: next to the e
 | `-l, --lang` | `PL` | languages in order of preference: `PL`, `ENG`, `PL,ENG` |
 | `--format` | `srt` | `srt` converts every format to SubRip; `original` keeps what the server has (`.txt`) |
 | `-e, --encoding` | `utf8bom` | `utf8bom`, `utf8`, or `cp1250` for old TVs and players |
-| `-s, --suffix` | off | name files `Film.pl.srt` instead of `Film.srt` |
-| `-f, --force` | off | overwrite existing subtitles (otherwise videos that have any are skipped) |
+| `-n, --naming` | `iso639-2` | file names: `iso639-2` (`Film.pol.srt`, `Film.eng.srt`), `iso639-1` (`Film.pl.srt`), `none` (`Film.srt`) |
+| `-f, --force` | off | replace existing subtitles in that language; the old files are kept as `.bak` |
 | `--no-recursive` | off | don't descend into subfolders |
 | `-j, --jobs` | `4` | videos in parallel; API requests are spaced at least 200 ms apart |
 | `--fps` | `23.976` | frame rate for MicroDVD conversion when the video's can't be read |
