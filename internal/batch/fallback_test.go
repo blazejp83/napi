@@ -20,6 +20,7 @@ type fakeOS struct {
 	byIMDb    map[int][]osdb.Subtitle
 	files     map[int]string
 	quotaFrom int // downloads after this many fail with ErrQuota (0 = never)
+	features  map[int]*osdb.Feature
 	downloads int
 	queries   []osdb.Query
 }
@@ -32,6 +33,15 @@ func (f *fakeOS) Search(_ context.Context, q osdb.Query) ([]osdb.Subtitle, error
 		return f.byHash[q.MovieHash], nil
 	}
 	return f.byIMDb[q.IMDbID], nil
+}
+
+func (f *fakeOS) Feature(_ context.Context, id int) (*osdb.Feature, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if ft, ok := f.features[id]; ok {
+		return ft, nil
+	}
+	return nil, errors.New("no such feature")
 }
 
 func (f *fakeOS) Download(_ context.Context, id int) ([]byte, error) {
@@ -168,10 +178,13 @@ func TestExtrasAndTitleGuard(t *testing.T) {
 	}
 	one := []osdb.File{{ID: 1}}
 	fos := &fakeOS{files: map[int]string{1: "1\r\n00:00:01,000 --> 00:00:02,000\r\nx\r\n"},
-		byIMDb: map[int][]osdb.Subtitle{0: {
-			{ID: "other", Language: "pl", Title: "Film Noir", Files: one},
-			{ID: "right", Language: "pl", Title: "Film", Release: "Film.2007", Files: one},
-		}}}
+		byIMDb: map[int][]osdb.Subtitle{
+			0: {
+				{ID: "other", Language: "pl", Title: "Film Noir", IMDbID: 11, Files: one},
+				{ID: "right", Language: "pl", Title: "Film", IMDbID: 12, Release: "Film.2007", Files: one},
+			},
+			12: {{ID: "right", Language: "pl", Title: "Film", IMDbID: 12, Release: "Film.2007", Files: one}},
+		}}
 	syncer := &shiftSyncer{}
 	r := &Runner{Config: config.Default(), Client: &fakeAPI{}, OS: fos,
 		NewSyncer: func(context.Context) (Syncer, error) { return syncer, nil }}
@@ -250,8 +263,8 @@ func TestStepsAndCancel(t *testing.T) {
 	v1 := write(t, filepath.Join(dir, "Movie (2007).mkv"), big+"1")
 	v2 := write(t, filepath.Join(dir, "Other (2008).mkv"), big+"2")
 	srt := "1\r\n00:00:01,000 --> 00:00:02,000\r\nx\r\n"
-	fos := &fakeOS{files: map[int]string{1: srt}, byIMDb: map[int][]osdb.Subtitle{
-		0: {{ID: "a", Language: "pl", Title: "Movie", Files: []osdb.File{{ID: 1}}}}}}
+	movie := osdb.Subtitle{ID: "a", Language: "pl", Title: "Movie", IMDbID: 21, Files: []osdb.File{{ID: 1}}}
+	fos := &fakeOS{files: map[int]string{1: srt}, byIMDb: map[int][]osdb.Subtitle{0: {movie}, 21: {movie}}}
 	bs := &blockingSyncer{started: make(chan struct{})}
 	cfg := config.Default()
 	cfg.Jobs = 1
@@ -277,5 +290,36 @@ func TestStepsAndCancel(t *testing.T) {
 	}
 	if res[1].Status != Failed || !errors.Is(res[1].Err, context.Canceled) {
 		t.Errorf("second video should be cancelled: %+v", res[1])
+	}
+}
+
+func TestTitleSearchUsesOriginalTitle(t *testing.T) {
+	dir := t.TempDir()
+	v := write(t, filepath.Join(dir, "A.Nos.Amours.1983.1080p.BluRay.x264.AAC-[YTS.MX].mp4"), strings.Repeat("v", 70*1024))
+	one := func(id int) []osdb.File { return []osdb.File{{ID: id}} }
+	srt := "1\r\n00:00:01,000 --> 00:00:02,000\r\nx\r\n"
+	fos := &fakeOS{
+		files: map[int]string{1: srt, 2: srt},
+		byIMDb: map[int][]osdb.Subtitle{
+			// The title search: fuzzy, English titles.
+			0: {
+				{ID: "xmas", Language: "pl", Title: "A Christmas Story", Year: 1983, IMDbID: 85334, Release: "Christmas Story A", Files: one(9)},
+				{ID: "loves", Language: "pl", Title: "To Our Loves", Year: 1983, IMDbID: 86650, Release: "Napisy PL", Files: one(1)},
+			},
+			86650: {{ID: "loves", Language: "pl", Title: "To Our Loves", Year: 1983, IMDbID: 86650, Release: "A.Nos.Amours.1983.1080p.BluRay", Files: one(2)}},
+		},
+		features: map[int]*osdb.Feature{
+			85334: {IMDbID: 85334, Title: "A Christmas Story", OriginalTitle: "A Christmas Story"},
+			86650: {IMDbID: 86650, Title: "to our loves", OriginalTitle: "À nos amours", AKA: []string{"To Our Loves"}},
+		},
+	}
+	r := &Runner{Config: config.Default(), Client: &fakeAPI{}, OS: fos,
+		NewSyncer: func(context.Context) (Syncer, error) { return &shiftSyncer{}, nil }}
+	res := r.Run(context.Background(), []string{v})[0]
+	if res.Status != Downloaded || res.Release != "A.Nos.Amours.1983.1080p.BluRay" {
+		t.Fatalf("%+v", res)
+	}
+	if fos.downloads != 1 {
+		t.Errorf("downloads = %d (A Christmas Story must not be tried)", fos.downloads)
 	}
 }

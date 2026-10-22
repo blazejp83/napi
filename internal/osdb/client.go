@@ -47,6 +47,7 @@ type Subtitle struct {
 	FromTrusted       bool
 	IMDbID            int
 	Title             string
+	Year              int
 	ParentTitle       string // the series, for episodes
 	Files             []File
 }
@@ -202,7 +203,7 @@ func (c *Client) Search(ctx context.Context, q Query) ([]Subtitle, error) {
 			AITranslated: a.AITranslated, MachineTranslated: a.MachineTranslated,
 			ForeignPartsOnly: a.ForeignPartsOnly, MovieHashMatch: a.MovieHashMatch,
 			FromTrusted: a.FromTrusted, IMDbID: int(a.FeatureDetails.IMDbID), Title: a.FeatureDetails.Title,
-			ParentTitle: a.FeatureDetails.ParentTitle,
+			ParentTitle: a.FeatureDetails.ParentTitle, Year: int(a.FeatureDetails.Year),
 		}
 		for _, f := range a.Files {
 			s.Files = append(s.Files, File{ID: int(f.FileID), Name: f.FileName})
@@ -246,6 +247,7 @@ type searchResponse struct {
 			FeatureDetails    struct {
 				IMDbID      num    `json:"imdb_id"`
 				Title       string `json:"title"`
+				Year        num    `json:"year"`
 				ParentTitle string `json:"parent_title"`
 			} `json:"feature_details"`
 			Files []struct {
@@ -384,4 +386,46 @@ func (c *Client) UserInfo(ctx context.Context) (*UserInfo, error) {
 	}
 	return &UserInfo{Level: resp.Data.Level, AllowedDownloads: int(resp.Data.AllowedDownloads),
 		RemainingDownloads: int(resp.Data.RemainingDownloads)}, nil
+}
+
+// Feature is a movie or episode in the OpenSubtitles catalogue.
+type Feature struct {
+	IMDbID        int
+	Title         string
+	OriginalTitle string
+	AKA           []string // alternative titles, e.g. other languages
+	Year          int
+	Type          string
+}
+
+// Names lists every title the feature is known by.
+func (f *Feature) Names() []string {
+	return append([]string{f.Title, f.OriginalTitle}, f.AKA...)
+}
+
+// Feature looks a movie up by IMDb ID, for its original and alternative
+// titles (search results carry only the English one).
+func (c *Client) Feature(ctx context.Context, imdbID int) (*Feature, error) {
+	var resp struct {
+		Data []struct {
+			Attributes struct {
+				Title         string   `json:"title"`
+				OriginalTitle string   `json:"original_title"`
+				AKA           []string `json:"title_aka"`
+				Year          num      `json:"year"`
+				IMDbID        num      `json:"imdb_id"`
+				Type          string   `json:"feature_type"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	u := c.BaseURL + "/features?imdb_id=" + strconv.Itoa(imdbID)
+	if err := c.do(ctx, http.MethodGet, u, nil, false, &resp); err != nil {
+		return nil, err
+	}
+	if len(resp.Data) == 0 {
+		return nil, fmt.Errorf("no OpenSubtitles feature tt%07d", imdbID)
+	}
+	a := resp.Data[0].Attributes
+	return &Feature{IMDbID: int(a.IMDbID), Title: a.Title, OriginalTitle: a.OriginalTitle,
+		AKA: a.AKA, Year: int(a.Year), Type: a.Type}, nil
 }

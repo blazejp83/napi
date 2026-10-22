@@ -79,6 +79,9 @@ func Describe(r batch.Result) string {
 		case batch.FromNapiOther:
 			s += " [NapiProjekt, other version synced: " + r.Release + "]"
 		}
+		if r.Machine {
+			s += " (machine translation)"
+		}
 		if r.Warning != "" {
 			s += " ! " + r.Warning
 		}

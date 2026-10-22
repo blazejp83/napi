@@ -70,6 +70,7 @@ type Result struct {
 	FPSFrom string // mkv, mp4, avi, ffprobe, subtitle, default
 	Source  Source
 	Release string // release the subtitles were made for, when synced
+	Machine bool   // OpenSubtitles marks the subtitles as machine-translated
 	// Movie is set for videos left without subtitles that NapiProjekt
 	// recognises: it likely has subtitles for other versions on its website.
 	Movie *napi.Movie
@@ -157,6 +158,7 @@ type MovieLookup interface {
 type OpenSubtitles interface {
 	Search(ctx context.Context, q osdb.Query) ([]osdb.Subtitle, error)
 	Download(ctx context.Context, fileID int) ([]byte, error)
+	Feature(ctx context.Context, imdbID int) (*osdb.Feature, error)
 }
 
 // Syncer aligns SubRip text to a video's audio; *subsync.Tools implements it.
@@ -293,6 +295,7 @@ func (r *Runner) process(ctx context.Context, video string) Result {
 				break
 			}
 			res.Lang, res.Source = lang, FromOS
+			res.Machine = s.AITranslated || s.MachineTranslated
 			return r.finish(res, r.save(video, content, lang, &res))
 		}
 	}
@@ -409,17 +412,9 @@ func (r *Runner) osDownload(ctx context.Context, s osdb.Subtitle, res *Result) (
 // episode) on OpenSubtitles and syncs the best candidate to the video's audio.
 func (r *Runner) similar(ctx context.Context, video, hash string, hashHits []osdb.Subtitle, res *Result) (Result, bool) {
 	r.step(video, StepOS)
-	q, ok := r.similarQuery(ctx, video, hash, hashHits, res)
+	_, cands, ok := r.otherReleases(ctx, video, hash, hashHits, res)
 	if !ok {
 		return Result{}, false
-	}
-	cands, err := r.osSearch(ctx, q)
-	if err != nil {
-		r.osFailed(err, res)
-		return Result{}, false
-	}
-	if q.IMDbID == 0 {
-		cands = osdb.SameTitle(cands, q.Text)
 	}
 	fps, _, _ := media.FrameRate(video)
 	ranked := osdb.Rank(cands, filepath.Base(video), fps, r.osLangs())
@@ -443,9 +438,85 @@ func (r *Runner) similar(ctx context.Context, video, hash string, hashHits []osd
 			continue
 		}
 		res.Source, res.Release = FromOSSynced, s.Release
+		res.Machine = s.AITranslated || s.MachineTranslated
 		return r.finish(*res, nil), true
 	}
 	return Result{}, false
+}
+
+// otherReleases searches OpenSubtitles for subtitles of the same movie or
+// episode. A title search is first narrowed to one movie, then repeated by
+// its IMDb ID for the complete list.
+func (r *Runner) otherReleases(ctx context.Context, video, hash string, hashHits []osdb.Subtitle, res *Result) (osdb.Query, []osdb.Subtitle, bool) {
+	q, ok := r.similarQuery(ctx, video, hash, hashHits, res)
+	if !ok {
+		return q, nil, false
+	}
+	cands, err := r.osSearch(ctx, q)
+	if err != nil {
+		r.osFailed(err, res)
+		return q, nil, false
+	}
+	if q.IMDbID != 0 {
+		return q, cands, true
+	}
+	if q.Episode > 0 {
+		return q, osdb.SameTitle(cands, q.Text), true
+	}
+	imdb := r.resolveMovie(ctx, cands, q.Text, q.Year)
+	if imdb == 0 {
+		return q, nil, true
+	}
+	q = osdb.Query{IMDbID: imdb, Languages: q.Languages}
+	cands, err = r.osSearch(ctx, q)
+	if err != nil {
+		r.osFailed(err, res)
+		return q, nil, false
+	}
+	return q, cands, true
+}
+
+// resolveMovie picks the movie a title search was about. Results are fuzzy
+// ("A Nos Amours" also returns "A Christmas Story"), and their title is the
+// English one ("To Our Loves"), so a candidate must have the right year and
+// a matching title, original title, alternative title or release name.
+func (r *Runner) resolveMovie(ctx context.Context, cands []osdb.Subtitle, title string, year int) int {
+	seen := map[int]bool{}
+	var order []osdb.Subtitle
+	for _, s := range cands {
+		if s.IMDbID > 0 && !seen[s.IMDbID] && (year == 0 || s.Year == 0 || abs(s.Year-year) <= 1) {
+			seen[s.IMDbID] = true
+			order = append(order, s)
+		}
+	}
+	want := osdb.NormTitle(title)
+	for _, s := range order {
+		rel := osdb.NormTitle(s.Release)
+		if osdb.TitleMatches(title, s.Title) || rel == want || strings.HasPrefix(rel, want+" ") {
+			return s.IMDbID
+		}
+	}
+	for i, s := range order {
+		if i == 5 {
+			break // the catalogue lookups are one request each
+		}
+		var f *osdb.Feature
+		err := r.retry(ctx, func() (err error) {
+			f, err = r.OS.Feature(ctx, s.IMDbID)
+			return err
+		})
+		if err == nil && osdb.TitleMatches(title, f.Names()...) {
+			return s.IMDbID
+		}
+	}
+	return 0
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // similarQuery identifies the movie or episode to search for: from
@@ -867,23 +938,14 @@ func (r *Runner) Candidates(ctx context.Context, video string) (osdb.Query, *nap
 	}
 	var res Result
 	hits := r.osSearchHash(ctx, video, &res)
-	q, ok := r.similarQuery(ctx, video, hash, hits, &res)
 	var cands []osdb.Subtitle
 	for _, s := range hits {
 		if s.MovieHashMatch {
 			cands = append(cands, s)
 		}
 	}
-	if ok {
-		more, err := r.osSearch(ctx, q)
-		if err != nil {
-			return q, res.movie, nil, err
-		}
-		if q.IMDbID == 0 {
-			more = osdb.SameTitle(more, q.Text)
-		}
-		cands = append(cands, more...)
-	}
+	q, more, _ := r.otherReleases(ctx, video, hash, hits, &res)
+	cands = append(cands, more...)
 	fps, _, _ := media.FrameRate(video)
 	ranked := osdb.Rank(dedupeSubs(cands), filepath.Base(video), fps, r.osLangs())
 	if res.Warning != "" && len(ranked) == 0 {

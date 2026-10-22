@@ -155,3 +155,11 @@ func TestClient(t *testing.T) {
 		t.Fatalf("logins = %d, want 1", logins)
 	}
 }
+
+func TestNormTitle(t *testing.T) {
+	for in, want := range map[string]string{"À nos amours": "a nos amours", "Łódź & Co.": "lodz and co", "Amélie!": "amelie"} {
+		if got := NormTitle(in); got != want {
+			t.Errorf("NormTitle(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

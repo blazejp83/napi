@@ -6,6 +6,11 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/runes"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -190,15 +195,38 @@ func GuessTitle(path string) Guess {
 	return g
 }
 
+// NormTitle reduces a title for comparison: lower case, accents removed,
+// punctuation dropped ("À nos amours!" -> "a nos amours").
+func NormTitle(s string) string {
+	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+	folded, _, err := transform.String(t, strings.ToLower(s))
+	if err != nil {
+		folded = strings.ToLower(s)
+	}
+	folded = strings.NewReplacer("ł", "l", "ø", "o", "æ", "ae", "ß", "ss", "&", " and ").Replace(folded)
+	return strings.Join(reTokens.FindAllString(folded, -1), " ")
+}
+
+// TitleMatches reports whether any of names is the same title as title.
+func TitleMatches(title string, names ...string) bool {
+	want := NormTitle(title)
+	if want == "" {
+		return false
+	}
+	for _, n := range names {
+		if NormTitle(n) == want {
+			return true
+		}
+	}
+	return false
+}
+
 // SameTitle keeps results whose movie (or, for episodes, series) title
-// matches title, ignoring case and punctuation; a text search also returns
-// loosely related titles.
+// matches title, ignoring case, accents and punctuation.
 func SameTitle(cands []Subtitle, title string) []Subtitle {
-	norm := func(s string) string { return strings.Join(reTokens.FindAllString(strings.ToLower(s), -1), " ") }
-	want := norm(title)
 	var out []Subtitle
 	for _, s := range cands {
-		if norm(s.Title) == want || norm(s.ParentTitle) == want {
+		if TitleMatches(title, s.Title, s.ParentTitle) {
 			out = append(out, s)
 		}
 	}

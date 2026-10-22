@@ -245,6 +245,9 @@ func singleMessage(r batch.Result) (string, string) {
 	case batch.Downloaded:
 		switch r.Source {
 		case batch.FromOSSynced, batch.FromNapiOther:
+			if r.Machine {
+				return "ok", "Jedyne dostępne napisy: tłumaczenie maszynowe z innej wersji, zsynchronizowane – sprawdź, czy pasują."
+			}
 			return "ok", "Napisy z innej wersji, zsynchronizowane – sprawdź, czy pasują."
 		case batch.FromOS:
 			return "ok", "Pobrano napisy z OpenSubtitles (" + r.Lang + ")."
@@ -407,6 +410,9 @@ func resultText(r batch.Result) string {
 		case batch.FromOS:
 			return "Pobrano z OpenSubtitles (" + r.Lang + ")"
 		case batch.FromOSSynced:
+			if r.Machine {
+				return "Tłumaczenie maszynowe z innej wersji (" + r.Release + "), zsynchronizowane"
+			}
 			return "Z innej wersji (" + r.Release + "), zsynchronizowane"
 		case batch.FromNapiOther:
 			return "Z innej wersji z NapiProjekt, zsynchronizowane"
