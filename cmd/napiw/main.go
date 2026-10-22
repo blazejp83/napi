@@ -48,7 +48,7 @@ func main() {
 		return
 	}
 	if cfgErr != nil {
-		winui.MessageBox("NapiProjekt", "Błąd w pliku ustawień:\n"+cfgErr.Error()+
+		winui.MessageBox("Napi", "Błąd w pliku ustawień:\n"+cfgErr.Error()+
 			"\n\nUruchom napiw.exe bez argumentów, aby otworzyć ustawienia.", winui.MBIconError)
 		os.Exit(1)
 	}
@@ -90,7 +90,7 @@ func main() {
 
 func fail(err error) {
 	if err != nil {
-		winui.MessageBox("NapiProjekt", "Nie udało się otworzyć okna:\n"+err.Error()+
+		winui.MessageBox("Napi", "Nie udało się otworzyć okna:\n"+err.Error()+
 			"\n\nnapi potrzebuje środowiska Microsoft Edge WebView2.", winui.MBIconError)
 		os.Exit(1)
 	}

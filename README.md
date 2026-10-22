@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" alt="Napi" width="420"></p>
+
 # napi
 
 Downloads Polish (and English) subtitles from [napiprojekt.pl](https://napiprojekt.pl) for video files and whole folder trees. Windows-first, a single portable exe, no installer.
@@ -101,6 +103,10 @@ The Explorer menu uses the same settings (`napi.json`) and writes the last run's
 ## Interface
 
 `napiw.exe` is a [Wails](https://wails.io) v2 app: Go backend, the HTML/CSS/JS frontend in `internal/gui/web` is embedded (no npm build step) and rendered by the Edge WebView2 runtime that ships with Windows 10/11. The corner card is a frameless tool window (no taskbar button) with an acrylic backdrop and Windows 11 rounded corners, placed above the taskbar in physical pixels; the settings window uses the Mica backdrop. Both follow the system light/dark theme. The console `napi.exe` doesn't use WebView2.
+
+## Logo
+
+The *Sync* mark (an audio waveform and a subtitle line held at the same moment by a playhead) and the drawn „napi” wordmark. `go run ./tools/mkicon` renders the mark into `assets/napi.ico` (16–256 px, with separate simplified drawings for 16–20 px and 24–40 px) and PNG previews; `build.sh` embeds the icon, a manifest and version info into both executables with go-winres. `docs/logo.svg` is the lockup.
 
 ## Build
 

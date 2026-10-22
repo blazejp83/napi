@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="200" viewBox="0 0 700 250" role="img" aria-label="Napi">
+  <rect width="700" height="250" rx="40" fill="#131B2E"/>
+  <g transform="translate(36 25) scale(0.833)">
+    <rect width="240" height="240" rx="56" fill="#1D2740"/>
+    <g fill="#4C8DFF">
+      <rect x="44" y="80" width="12" height="24" rx="6"/><rect x="64" y="64" width="12" height="56" rx="6"/>
+      <rect x="84" y="48" width="12" height="88" rx="6"/><rect x="104" y="72" width="12" height="40" rx="6"/>
+      <rect x="124" y="56" width="12" height="72" rx="6"/><rect x="144" y="40" width="12" height="104" rx="6"/>
+      <rect x="164" y="68" width="12" height="48" rx="6"/><rect x="184" y="78" width="12" height="28" rx="6"/>
+    </g>
+    <rect x="117" y="30" width="6" height="182" rx="3" fill="#FFC23D"/>
+    <rect x="64" y="166" width="112" height="24" rx="12" fill="#FFC23D"/>
+  </g>
+  <g transform="translate(250 -5)">
+    <path d="M30 204 V132 A38 38 0 0 1 106 132 V204 M220 128 V204 M266 128 V246 M388 132 V204" stroke="#F5F3EE" stroke-width="26" stroke-linecap="round" fill="none"/>
+    <circle cx="182" cy="166" r="38" stroke="#F5F3EE" stroke-width="26" fill="none"/>
+    <circle cx="304" cy="166" r="38" stroke="#F5F3EE" stroke-width="26" fill="none"/>
+    <rect x="362" y="80" width="60" height="26" rx="13" fill="#FFC23D"/>
+  </g>
+</svg>

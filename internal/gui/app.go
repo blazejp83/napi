@@ -27,8 +27,8 @@ import (
 var assets embed.FS
 
 const (
-	panelTitle    = "NapiProjekt – postęp"
-	settingsTitle = "NapiProjekt – ustawienia"
+	panelTitle    = "Napi – postęp"
+	settingsTitle = "Napi – ustawienia"
 	panelWidth    = 380
 	panelHeight   = 156
 )

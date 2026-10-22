@@ -55,7 +55,7 @@ a:hover { text-decoration: underline; }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
 .bar { display: flex; align-items: center; justify-content: space-between; height: 26px; color: var(--fg2); font-size: 12px; }
 .brand { display: flex; align-items: center; gap: 7px; }
-.brand svg { width: 16px; height: 16px; color: var(--accent); }
+.brand svg { width: 16px; height: 16px; }
 .tools { display: flex; gap: 2px; margin-right: -6px; }
 .body { display: flex; gap: 10px; align-items: flex-start; margin-top: 6px; min-height: 40px; }
 .status { width: 20px; height: 20px; flex: none; margin-top: 2px; }
@@ -97,7 +97,7 @@ a:hover { text-decoration: underline; }
 .scroll::-webkit-scrollbar { width: 6px; }
 .scroll::-webkit-scrollbar-thumb { background: rgba(127, 127, 127, .45); border-radius: 3px; }
 .scroll::-webkit-scrollbar-thumb:hover { background: rgba(127, 127, 127, .7); }
-.settings h1 svg { width: 26px; height: 26px; color: var(--accent); }
+.settings h1 svg { width: 32px; height: 32px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 16px 10px; margin-bottom: 12px; }
 .card h2, .card summary { font-size: 14px; font-weight: 600; margin: 8px 0 6px; }
 .card summary { cursor: default; padding: 2px 0; }
