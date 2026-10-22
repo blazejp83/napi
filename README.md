@@ -3,6 +3,7 @@
 Downloads Polish (and English) subtitles from [napiprojekt.pl](https://napiprojekt.pl) for video files and whole folder trees. Windows-first, a single portable exe, no installer.
 
 - **Explorer menu:** right-click a video, several videos, a folder or a folder background → *Pobierz napisy* (configured languages, Polish by default) or *Pobierz napisy (eng)* (English only, from both NapiProjekt and OpenSubtitles). Progress shows in a card in the bottom-right corner (current step and file, overall progress, *Anuluj*); when done it shows the result with actions (*Pokaż plik*, *Otwórz stronę filmu*, *Szczegóły* with a per-file list) and closes itself after a clean success.
+- **Re-sync existing subtitles:** right-click one or more `.srt`/`.sub` files → *Synchronizuj napisy*. Each is matched to the video of the same name in its folder (`Film.pol.srt`, `Film.pl.forced.srt` → `Film.mkv`), aligned to its audio and saved in place as `.srt`; the previous file is kept as `.bak`. Command line: `napi sync Film.pol.srt [more…]` (wildcards work in cmd too).
 - **Drag and drop** videos or folders onto `napiw.exe`.
 - **Settings window:** start `napiw.exe` on its own: languages, format, encoding, naming, OpenSubtitles login with a connection test, the Explorer menu switch.
 - **CLI** for batch jobs and scripts: `napi get D:\Filmy E:\Seriale`.

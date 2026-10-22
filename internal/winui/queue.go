@@ -16,20 +16,22 @@ type Queue struct{ Dir string }
 func NewQueue() *Queue { return &Queue{Dir: filepath.Join(os.TempDir(), "napi-queue")} }
 
 // Group is paths queued by one launch, with the subtitle language its menu
-// entry asked for ("" for the configured languages).
+// entry asked for ("" for the configured languages) and the job: "" to
+// download subtitles, "sync" to re-sync subtitle files.
 type Group struct {
 	Lang  string
+	Mode  string
 	Paths []string
 }
 
 // Add records paths for whichever process handles the queue.
-func (q *Queue) Add(lang string, paths []string) error {
+func (q *Queue) Add(lang, mode string, paths []string) error {
 	if err := os.MkdirAll(q.Dir, 0o755); err != nil {
 		return err
 	}
 	name := fmt.Sprintf("%d-%d.path", time.Now().UnixNano(), os.Getpid())
 	tmp := filepath.Join(q.Dir, name+".tmp")
-	body := "lang=" + lang + "\n" + strings.Join(paths, "\n")
+	body := "lang=" + lang + "\nmode=" + mode + "\n" + strings.Join(paths, "\n")
 	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
 		return err
 	}
@@ -67,21 +69,26 @@ func (q *Queue) Drain(quiet, max time.Duration) []Group {
 		if err != nil {
 			continue
 		}
-		lang := ""
+		lang, mode := "", ""
 		for i, p := range strings.Split(string(b), "\n") {
 			p = strings.TrimSpace(p)
-			if i == 0 && strings.HasPrefix(p, "lang=") {
+			if i < 2 && strings.HasPrefix(p, "lang=") {
 				lang = strings.TrimPrefix(p, "lang=")
+				continue
+			}
+			if i < 2 && strings.HasPrefix(p, "mode=") {
+				mode = strings.TrimPrefix(p, "mode=")
 				continue
 			}
 			if p == "" {
 				continue
 			}
-			gi, ok := index[lang]
+			key := lang + "|" + mode
+			gi, ok := index[key]
 			if !ok {
 				gi = len(groups)
-				index[lang] = gi
-				groups = append(groups, Group{Lang: lang})
+				index[key] = gi
+				groups = append(groups, Group{Lang: lang, Mode: mode})
 			}
 			groups[gi].Paths = append(groups[gi].Paths, p)
 		}

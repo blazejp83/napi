@@ -20,18 +20,29 @@ func syncCmd() *cobra.Command {
 	var out string
 	var force bool
 	cmd := &cobra.Command{
-		Use:   "sync <video> <subtitles file | napiprojekt:hash>",
-		Short: "Align subtitles made for another release to the video's audio",
+		Use:   "sync <subtitles>... | sync <video> <subtitles file | napiprojekt:hash>",
+		Short: "Align subtitles to a video's audio",
 		Long: "Converts the subtitles to SRT and aligns them to the video's audio with alass\n" +
-			"(downloaded on first use). The subtitles can be a file or a napiprojekt:<hash>\n" +
-			"link copied from a movie's page on napiprojekt.pl.",
-		Example: `  napi sync Film.mkv Film.inna-wersja.txt
+			"(downloaded on first use).\n\n" +
+			"With only subtitle files, each is re-synced to the video of the same name in its\n" +
+			"folder (Film.pol.srt -> Film.mkv) and saved in place; the old file is kept as .bak.\n" +
+			"With a video and subtitles (a file or a napiprojekt:<hash> link from a movie's page\n" +
+			"on napiprojekt.pl), the result is saved as the video's subtitles.",
+		Example: `  napi sync Film.pol.srt
+  napi sync D:\Seriale\*.pol.srt
+  napi sync Film.mkv Film.inna-wersja.txt
   napi sync Odcinek.mkv napiprojekt:adf4a3563a2b0dac41bdd7327a9345dc`,
-		Args: cobra.ExactArgs(2),
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, _, err := config.Load()
 			if err != nil {
 				return err
+			}
+			if resyncArgs(args) {
+				return resync(cmd, cfg, args)
+			}
+			if len(args) != 2 {
+				return errors.New("give subtitle files to re-sync, or one video and one subtitle file/link")
 			}
 			video, src := args[0], args[1]
 			r := batch.NewRunner(cfg)
@@ -148,4 +159,45 @@ func accountCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// resyncArgs reports whether every argument is a subtitle file.
+func resyncArgs(args []string) bool {
+	for _, a := range args {
+		if _, ok := app.NapiLinkHash(a); ok || !batch.IsSubtitleFile(a) {
+			return false
+		}
+	}
+	return true
+}
+
+func resync(cmd *cobra.Command, cfg config.Config, args []string) error {
+	// cmd.exe passes wildcards through unexpanded.
+	var files []string
+	for _, a := range args {
+		if strings.ContainsAny(a, "*?") {
+			m, _ := filepath.Glob(a)
+			files = append(files, m...)
+		} else {
+			files = append(files, a)
+		}
+	}
+	if len(files) == 0 {
+		return errors.New("no subtitle files match")
+	}
+	r := batch.NewRunner(cfg)
+	fmt.Fprintln(os.Stderr, "syncing (each file reads its video's whole audio track)...")
+	r.Progress = func(done, total int, res batch.Result) {
+		msg := "-> " + filepath.Base(res.Output)
+		if res.Err != nil {
+			msg = res.Err.Error()
+		}
+		fmt.Printf("[%d/%d] %-9s %s  %s\n", done, total, res.Status, filepath.Base(res.Video), msg)
+	}
+	s := batch.Summarize(r.SyncFiles(cmd.Context(), files))
+	fmt.Printf("\nSynced %d, errors %d\n", s.Synced, s.Failed)
+	if s.Failed > 0 {
+		return exitError{1}
+	}
+	return nil
 }

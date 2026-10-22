@@ -900,7 +900,7 @@ func Summarize(results []Result) Summary {
 		switch r.Status {
 		case Downloaded:
 			s.Downloaded++
-			if r.Source == FromOSSynced || r.Source == FromNapiOther {
+			if r.Source == FromOSSynced || r.Source == FromNapiOther || r.Source == FromResync {
 				s.Synced++
 			}
 		case NotFound:
@@ -964,4 +964,116 @@ func dedupeSubs(in []osdb.Subtitle) []osdb.Subtitle {
 		}
 	}
 	return out
+}
+
+// FromResync marks subtitles that were already next to the video and were
+// re-aligned to its audio ("Synchronizuj napisy").
+const FromResync Source = "resync"
+
+// FindVideo finds the video a subtitle file belongs to, in the same folder:
+// Film.pol.srt, Film.pl.forced.srt and Film.srt all belong to Film.mkv.
+func FindVideo(sub string, exts []string) (string, error) {
+	dir := filepath.Dir(sub)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	isVideo := map[string]bool{}
+	for _, e := range exts {
+		isVideo["."+strings.ToLower(strings.TrimPrefix(e, "."))] = true
+	}
+	videos := map[string]string{} // lower-case base name -> file name
+	for _, e := range entries {
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if !e.IsDir() && isVideo[ext] {
+			videos[strings.ToLower(strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())))] = e.Name()
+		}
+	}
+	base := strings.TrimSuffix(filepath.Base(sub), filepath.Ext(sub))
+	for b := base; b != ""; {
+		if v, ok := videos[strings.ToLower(b)]; ok {
+			return filepath.Join(dir, v), nil
+		}
+		i := strings.LastIndex(b, ".")
+		if i <= 0 {
+			break
+		}
+		b = b[:i]
+	}
+	return "", fmt.Errorf("no video file for %s in its folder", filepath.Base(sub))
+}
+
+// SyncFiles re-aligns existing subtitle files to their videos' audio, one
+// at a time. Each result is saved under the subtitle's name with .srt; the
+// file it replaces is kept as <name>.bak.
+func (r *Runner) SyncFiles(ctx context.Context, files []string) []Result {
+	results := make([]Result, 0, len(files))
+	for i, sub := range files {
+		res := r.syncFile(ctx, sub)
+		results = append(results, res)
+		if r.Progress != nil {
+			r.Progress(i+1, len(files), res)
+		}
+		if ctx.Err() != nil {
+			for _, rest := range files[i+1:] {
+				results = append(results, Result{Video: rest, Status: Failed, Err: ctx.Err()})
+			}
+			break
+		}
+	}
+	return results
+}
+
+func (r *Runner) syncFile(ctx context.Context, sub string) Result {
+	res := Result{Video: sub, Source: FromResync}
+	video, err := FindVideo(sub, r.Config.Extensions)
+	if err != nil {
+		return r.finish(res, err)
+	}
+	res.Video = video
+	content, err := os.ReadFile(sub)
+	if err != nil {
+		return r.finish(res, err)
+	}
+	d, cues, err := toCues(video, content, r.Config.DefaultFPS)
+	if err != nil {
+		return r.finish(res, err)
+	}
+	ext := filepath.Ext(sub)
+	tags := strings.FieldsFunc(strings.ToLower(strings.TrimSuffix(filepath.Base(sub), ext)), func(r rune) bool { return r == '.' })
+	res.Lang = tagLang(tags)
+	if res.Lang == "" {
+		text, _ := subs.Decode(content)
+		res.Lang = subs.DetectLanguage(text)
+	}
+	syncer, err := r.getSyncer(ctx)
+	if err != nil {
+		return r.finish(res, fmt.Errorf("%w: %v", errNoSyncer, err))
+	}
+	r.step(video, StepSync)
+	synced, err := r.runSync(ctx, syncer, video, subs.WriteSRT(cues))
+	if err != nil {
+		return r.finish(res, fmt.Errorf("sync failed: %w", err))
+	}
+	if out, err := subs.Parse(synced, subs.SubRip, 0); err == nil {
+		synced = subs.WriteSRT(out)
+	}
+	res.Charset, res.Format, res.Release = d.charset, d.format, filepath.Base(sub)
+	res.Output = strings.TrimSuffix(sub, ext) + ".srt"
+	if _, err := os.Stat(res.Output); err == nil {
+		os.Remove(res.Output + ".bak")
+		if err := os.Rename(res.Output, res.Output+".bak"); err != nil {
+			return r.finish(res, fmt.Errorf("backing up %s: %w", filepath.Base(res.Output), err))
+		}
+	}
+	return r.finish(res, writeAtomic(res.Output, subs.Encode(synced, r.Config.Encoding)))
+}
+
+// IsSubtitleFile reports whether path has a subtitle extension napi can sync.
+func IsSubtitleFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".srt", ".sub", ".txt", ".mpl":
+		return true
+	}
+	return false
 }

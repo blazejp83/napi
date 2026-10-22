@@ -19,7 +19,7 @@ const (
 	classes = `Software\Classes`
 	// menuSchema changes whenever the registered entries change, so an
 	// updated napiw re-registers itself (see RefreshMenu).
-	menuSchema = "2"
+	menuSchema = "3"
 	stateKey   = `Software\napi`
 )
 
@@ -28,6 +28,12 @@ var verbs = []struct{ key, label, args string }{
 	{verbKey, "Pobierz napisy", ""},
 	{verbKey + "-eng", "Pobierz napisy (eng)", "--lang=ENG "},
 }
+
+// syncVerb is the entry on subtitle files: re-sync them to their video.
+var syncVerb = struct{ key, label, args string }{verbKey + "-sync", "Synchronizuj napisy", "--sync "}
+
+// subtitleExts get the sync entry.
+var subtitleExts = []string{"srt", "sub"}
 
 // MenuExecutable is the program the menu runs: napiw.exe next to the current
 // executable (no console window), or the current executable itself.
@@ -124,6 +130,26 @@ func InstallMenu(exe string, exts []string) error {
 			}
 		}
 	}
+	for _, e := range subtitleExts {
+		base := classes + `\SystemFileAssociations\.` + e + `\shell\` + syncVerb.key
+		k, _, err := registry.CreateKey(registry.CURRENT_USER, base, registry.SET_VALUE)
+		if err != nil {
+			return fmt.Errorf("%s: %w", base, err)
+		}
+		k.SetStringValue("", syncVerb.label)
+		k.SetStringValue("Icon", exe)
+		k.SetStringValue("MultiSelectModel", "Player")
+		k.Close()
+		c, _, err := registry.CreateKey(registry.CURRENT_USER, base+`\command`, registry.SET_VALUE)
+		if err != nil {
+			return fmt.Errorf("%s: %w", base, err)
+		}
+		err = c.SetStringValue("", fmt.Sprintf(`"%s" %s"%%1"`, exe, syncVerb.args))
+		c.Close()
+		if err != nil {
+			return err
+		}
+	}
 	if k, _, err := registry.CreateKey(registry.CURRENT_USER, stateKey, registry.SET_VALUE); err == nil {
 		k.SetStringValue("MenuSchema", menuSchema)
 		k.SetStringValue("MenuExe", exe)
@@ -167,8 +193,9 @@ func UninstallMenu() error {
 		}
 	}
 	parents = append(parents, verbParents(nil)...)
+	all := append(append([]struct{ key, label, args string }{}, verbs...), syncVerb)
 	for _, parent := range parents {
-		for _, v := range verbs {
+		for _, v := range all {
 			base := classes + `\` + parent + `\shell\` + v.key
 			for _, k := range []string{base + `\command`, base} {
 				if err := registry.DeleteKey(registry.CURRENT_USER, k); err != nil && !errors.Is(err, registry.ErrNotExist) {

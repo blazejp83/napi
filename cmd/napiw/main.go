@@ -30,11 +30,17 @@ func main() {
 			app.LogError("menu refresh", err)
 		}
 	}
-	lang := ""
-	if len(args) > 0 && strings.HasPrefix(args[0], "--lang=") {
-		lang, args = strings.ToUpper(strings.TrimPrefix(args[0], "--lang=")), args[1:]
+	lang, mode := "", ""
+	for len(args) > 0 && strings.HasPrefix(args[0], "--") && args[0] != queueFlag {
+		switch {
+		case strings.HasPrefix(args[0], "--lang="):
+			lang = strings.ToUpper(strings.TrimPrefix(args[0], "--lang="))
+		case args[0] == "--sync":
+			mode = "sync"
+		}
+		args = args[1:]
 	}
-	if len(args) == 0 && lang == "" {
+	if len(args) == 0 && lang == "" && mode == "" {
 		fail(gui.RunSettings(cfg))
 		return
 	}
@@ -59,8 +65,8 @@ func main() {
 	runtime.LockOSThread()
 	q := winui.NewQueue()
 	if args[0] != queueFlag {
-		if err := q.Add(lang, args); err != nil {
-			fail(gui.RunPanel(cfg, gui.BatchJob([]winui.Group{{Lang: lang, Paths: args}}, func() []winui.Group { return nil })))
+		if err := q.Add(lang, mode, args); err != nil {
+			fail(gui.RunPanel(cfg, gui.BatchJob([]winui.Group{{Lang: lang, Mode: mode, Paths: args}}, func() []winui.Group { return nil })))
 			return
 		}
 	}

@@ -323,3 +323,53 @@ func TestTitleSearchUsesOriginalTitle(t *testing.T) {
 		t.Errorf("downloads = %d (A Christmas Story must not be tried)", fos.downloads)
 	}
 }
+
+func TestFindVideo(t *testing.T) {
+	dir := t.TempDir()
+	v := write(t, filepath.Join(dir, "Film.2007.1080p.mkv"), "v")
+	write(t, filepath.Join(dir, "Other.mp4"), "o")
+	exts := config.Default().Extensions
+	for _, sub := range []string{"Film.2007.1080p.srt", "Film.2007.1080p.pol.srt", "film.2007.1080p.PL.forced.srt"} {
+		if got, err := FindVideo(filepath.Join(dir, sub), exts); err != nil || got != v {
+			t.Errorf("%s: %q %v", sub, got, err)
+		}
+	}
+	if _, err := FindVideo(filepath.Join(dir, "Unrelated.srt"), exts); err == nil {
+		t.Error("Unrelated.srt matched a video")
+	}
+}
+
+func TestSyncFiles(t *testing.T) {
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "Film.mkv"), "v")
+	srt := "1\r\n00:00:01,000 --> 00:00:02,000\r\nCześć\r\n\r\n"
+	a := write(t, filepath.Join(dir, "Film.pol.srt"), srt)
+	b := write(t, filepath.Join(dir, "Film.eng.sub"), "{25}{50}Hello")
+	c := write(t, filepath.Join(dir, "Orphan.srt"), srt)
+	cfg := config.Default()
+	cfg.Encoding = "utf8"
+	s := &shiftSyncer{}
+	r := &Runner{Config: cfg, NewSyncer: func(context.Context) (Syncer, error) { return s, nil }}
+	res := r.SyncFiles(context.Background(), []string{a, b, c})
+	if res[0].Status != Downloaded || res[0].Output != a || res[0].Lang != "PL" {
+		t.Errorf("srt: %+v", res[0])
+	}
+	if got, _ := os.ReadFile(a); !strings.Contains(string(got), "00:00:03,500") {
+		t.Errorf("synced file: %q", got)
+	}
+	if old, _ := os.ReadFile(a + ".bak"); string(old) != srt {
+		t.Errorf("backup: %q", old)
+	}
+	if res[1].Status != Downloaded || filepath.Base(res[1].Output) != "Film.eng.srt" || res[1].Lang != "ENG" {
+		t.Errorf("sub: %+v", res[1])
+	}
+	if _, err := os.Stat(b); err != nil {
+		t.Error("the .sub input should stay")
+	}
+	if res[2].Status != Failed {
+		t.Errorf("orphan: %+v", res[2])
+	}
+	if sum := Summarize(res); sum.Synced != 2 {
+		t.Errorf("summary %+v", sum)
+	}
+}

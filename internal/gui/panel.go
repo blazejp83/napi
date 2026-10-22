@@ -77,6 +77,13 @@ func BatchJob(groups []winui.Group, more func() []winui.Group) func(ctx context.
 		for len(groups) > 0 && ctx.Err() == nil {
 			g := groups[0]
 			groups = groups[1:]
+			if g.Mode == "sync" {
+				all = append(all, a.syncRound(ctx, g.Paths, len(all))...)
+				if len(groups) == 0 && ctx.Err() == nil {
+					groups = more()
+				}
+				continue
+			}
 			cfg := a.cfg
 			if g.Lang != "" {
 				cfg.Languages = []string{g.Lang}
@@ -133,6 +140,23 @@ func (a *App) runRound(ctx context.Context, cfg config.Config, videos []string, 
 		a.setState(func(s *PanelState) { s.Done = base + done })
 	}
 	return r.Run(ctx, videos)
+}
+
+// syncRound re-syncs subtitle files chosen with "Synchronizuj napisy".
+func (a *App) syncRound(ctx context.Context, files []string, base int) []batch.Result {
+	a.setState(func(s *PanelState) {
+		s.Phase, s.Total, s.Done, s.Choices = "running", base+len(files), base, nil
+		s.Title, s.Detail = stepText[batch.StepSync]+"…", filepath.Base(files[0])
+		s.Busy = base+len(files) == 1
+	})
+	r := batch.NewRunner(a.cfg)
+	r.OnStep = func(video string, step batch.Step) {
+		a.setState(func(s *PanelState) { s.Title, s.Detail = stepText[step]+"…", filepath.Base(video) })
+	}
+	r.Progress = func(done, total int, res batch.Result) {
+		a.setState(func(s *PanelState) { s.Done = base + done })
+	}
+	return r.SyncFiles(ctx, files)
 }
 
 // askReplace asks what to do when some videos already have subtitles in
@@ -228,7 +252,13 @@ func (a *App) finishBatch(ctx context.Context, results []batch.Result) {
 		kind = "none"
 	}
 	if msg == "" {
-		msg = summaryText(s)
+		resyncOnly := true
+		for _, r := range results {
+			if r.Source != batch.FromResync {
+				resyncOnly = false
+			}
+		}
+		msg = summaryText(s, resyncOnly)
 	}
 	output := ""
 	if len(results) == 1 && results[0].Output != "" {
@@ -244,6 +274,8 @@ func singleMessage(r batch.Result) (string, string) {
 	switch r.Status {
 	case batch.Downloaded:
 		switch r.Source {
+		case batch.FromResync:
+			return "ok", "Napisy " + filepath.Base(r.Output) + " zsynchronizowane z dźwiękiem filmu. Poprzednie są w kopii .bak."
 		case batch.FromOSSynced, batch.FromNapiOther:
 			if r.Machine {
 				return "ok", "Jedyne dostępne napisy: tłumaczenie maszynowe z innej wersji, zsynchronizowane – sprawdź, czy pasują."
@@ -265,7 +297,15 @@ func singleMessage(r batch.Result) (string, string) {
 	return "error", app.Message(r)
 }
 
-func summaryText(s batch.Summary) string {
+// summaryText sums up a run; resyncOnly marks a "Synchronizuj napisy" run.
+func summaryText(s batch.Summary, resyncOnly bool) string {
+	if s.Downloaded > 0 && s.Synced == s.Downloaded && s.Skipped == 0 && s.NotFound == 0 && resyncOnly {
+		t := fmt.Sprintf("Zsynchronizowano %d", s.Synced)
+		if s.Failed > 0 {
+			t += fmt.Sprintf(", błędy %d", s.Failed)
+		}
+		return t + ". Poprzednie wersje są w kopiach .bak."
+	}
 	t := fmt.Sprintf("Pobrano %d", s.Downloaded)
 	if s.Synced > 0 {
 		t += fmt.Sprintf(" (zsynchronizowane: %d)", s.Synced)
@@ -288,7 +328,7 @@ func (a *App) finish(results []batch.Result, kind, msg, output string) {
 	seen := map[string]bool{}
 	for _, r := range results {
 		v := ResultView{Name: filepath.Base(r.Video), Status: string(r.Status), Output: r.Output, Text: resultText(r)}
-		if r.Status == batch.Downloaded && (r.Source == batch.FromOSSynced || r.Source == batch.FromNapiOther) {
+		if r.Status == batch.Downloaded && (r.Source == batch.FromOSSynced || r.Source == batch.FromNapiOther || r.Source == batch.FromResync) {
 			v.Status = "synced"
 		}
 		if r.Status == batch.NotFound && r.Movie != nil {
@@ -339,7 +379,7 @@ func (a *App) autoClose(ctx context.Context, kind string, results []batch.Result
 		return
 	}
 	for _, r := range results {
-		if r.Warning != "" || r.Source == batch.FromOSSynced || r.Source == batch.FromNapiOther {
+		if r.Warning != "" || r.Source == batch.FromOSSynced || r.Source == batch.FromNapiOther || r.Source == batch.FromResync {
 			return // synced subtitles deserve a look at the message
 		}
 	}
@@ -416,6 +456,8 @@ func resultText(r batch.Result) string {
 			return "Z innej wersji (" + r.Release + "), zsynchronizowane"
 		case batch.FromNapiOther:
 			return "Z innej wersji z NapiProjekt, zsynchronizowane"
+		case batch.FromResync:
+			return "Zsynchronizowano: " + filepath.Base(r.Output)
 		}
 		return "Pobrano z NapiProjekt (" + r.Lang + ")"
 	case batch.Skipped:
