@@ -1,4 +1,4 @@
-module github.com/blaze/napi
+module github.com/blazejp83/napi
 
 go 1.25.0
 

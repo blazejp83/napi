@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/blaze/napi/internal/config"
-	"github.com/blaze/napi/internal/osdb"
-	"github.com/blaze/napi/internal/winui"
+	"github.com/blazejp83/napi/internal/config"
+	"github.com/blazejp83/napi/internal/osdb"
+	"github.com/blazejp83/napi/internal/winui"
 )
 
 // Settings is what the settings window edits.

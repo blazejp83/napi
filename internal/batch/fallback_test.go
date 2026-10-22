@@ -9,9 +9,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/blaze/napi/internal/config"
-	"github.com/blaze/napi/internal/napi"
-	"github.com/blaze/napi/internal/osdb"
+	"github.com/blazejp83/napi/internal/config"
+	"github.com/blazejp83/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/osdb"
 )
 
 type fakeOS struct {

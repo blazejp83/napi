@@ -14,12 +14,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blaze/napi/internal/config"
-	"github.com/blaze/napi/internal/media"
-	"github.com/blaze/napi/internal/napi"
-	"github.com/blaze/napi/internal/osdb"
-	"github.com/blaze/napi/internal/subs"
-	"github.com/blaze/napi/internal/subsync"
+	"github.com/blazejp83/napi/internal/config"
+	"github.com/blazejp83/napi/internal/media"
+	"github.com/blazejp83/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/osdb"
+	"github.com/blazejp83/napi/internal/subs"
+	"github.com/blazejp83/napi/internal/subsync"
 )
 
 type Status string

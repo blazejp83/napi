@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/blaze/napi/internal/batch"
-	"github.com/blaze/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/batch"
+	"github.com/blazejp83/napi/internal/napi"
 )
 
 var reNapiLink = regexp.MustCompile(`(?i)^napiprojekt:(?://)?([0-9a-f]{32})/?$`)

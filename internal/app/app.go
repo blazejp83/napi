@@ -10,12 +10,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/blaze/napi/internal/batch"
-	"github.com/blaze/napi/internal/napi"
-	"github.com/blaze/napi/internal/pending"
+	"github.com/blazejp83/napi/internal/batch"
+	"github.com/blazejp83/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/pending"
 )
 
-// Version is set at build time with -ldflags "-X github.com/blaze/napi/internal/app.Version=...".
+// Version is set at build time with -ldflags "-X github.com/blazejp83/napi/internal/app.Version=...".
 var Version = "dev"
 
 // WriteCSV writes one row per result.

@@ -18,7 +18,7 @@ const (
 	// DefaultClient is the client name sent to the API. The server only answers
 	// whitelisted names; this is the one used by open-source NapiProjekt clients.
 	DefaultClient = "NapiProjektPython"
-	userAgent     = "napi-go/0.1 (+https://github.com/blaze/napi)"
+	userAgent     = "napi-go/0.1 (+https://github.com/blazejp83/napi)"
 )
 
 // ErrNotFound means the database has no subtitles for the hash and language.

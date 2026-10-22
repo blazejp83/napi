@@ -13,13 +13,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/blaze/napi/internal/app"
-	"github.com/blaze/napi/internal/batch"
-	"github.com/blaze/napi/internal/config"
-	"github.com/blaze/napi/internal/media"
-	"github.com/blaze/napi/internal/napi"
-	"github.com/blaze/napi/internal/subs"
-	"github.com/blaze/napi/internal/winui"
+	"github.com/blazejp83/napi/internal/app"
+	"github.com/blazejp83/napi/internal/batch"
+	"github.com/blazejp83/napi/internal/config"
+	"github.com/blazejp83/napi/internal/media"
+	"github.com/blazejp83/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/subs"
+	"github.com/blazejp83/napi/internal/winui"
 )
 
 // exitError carries a process exit code through cobra.

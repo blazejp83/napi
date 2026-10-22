@@ -19,8 +19,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/blaze/napi/internal/app"
-	"github.com/blaze/napi/internal/config"
+	"github.com/blazejp83/napi/internal/app"
+	"github.com/blazejp83/napi/internal/config"
 )
 
 //go:embed web

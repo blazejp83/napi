@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/blaze/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/napi"
 )
 
 func TestStore(t *testing.T) {

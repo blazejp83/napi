@@ -10,12 +10,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/blaze/napi/internal/app"
-	"github.com/blaze/napi/internal/batch"
-	"github.com/blaze/napi/internal/config"
-	"github.com/blaze/napi/internal/napi"
-	"github.com/blaze/napi/internal/pending"
-	"github.com/blaze/napi/internal/winui"
+	"github.com/blazejp83/napi/internal/app"
+	"github.com/blazejp83/napi/internal/batch"
+	"github.com/blazejp83/napi/internal/config"
+	"github.com/blazejp83/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/pending"
+	"github.com/blazejp83/napi/internal/winui"
 )
 
 // PanelState is everything the corner card shows.

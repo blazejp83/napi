@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blaze/napi/internal/proc"
+	"github.com/blazejp83/napi/internal/proc"
 )
 
 var errNoDuration = errors.New("duration not found")

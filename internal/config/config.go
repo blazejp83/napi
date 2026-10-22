@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/blaze/napi/internal/napi"
-	"github.com/blaze/napi/internal/osdb"
-	"github.com/blaze/napi/internal/subs"
+	"github.com/blazejp83/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/osdb"
+	"github.com/blazejp83/napi/internal/subs"
 )
 
 const FileName = "napi.json"

@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blaze/napi/internal/app"
-	"github.com/blaze/napi/internal/config"
-	"github.com/blaze/napi/internal/gui"
-	"github.com/blaze/napi/internal/winui"
+	"github.com/blazejp83/napi/internal/app"
+	"github.com/blazejp83/napi/internal/config"
+	"github.com/blazejp83/napi/internal/gui"
+	"github.com/blazejp83/napi/internal/winui"
 )
 
 const queueFlag = "--queue"

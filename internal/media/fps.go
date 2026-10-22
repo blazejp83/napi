@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blaze/napi/internal/proc"
+	"github.com/blazejp83/napi/internal/proc"
 )
 
 var errNoFPS = errors.New("frame rate not found")

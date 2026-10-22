@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/blaze/napi/internal/app"
-	"github.com/blaze/napi/internal/batch"
-	"github.com/blaze/napi/internal/config"
-	"github.com/blaze/napi/internal/media"
-	"github.com/blaze/napi/internal/osdb"
+	"github.com/blazejp83/napi/internal/app"
+	"github.com/blazejp83/napi/internal/batch"
+	"github.com/blazejp83/napi/internal/config"
+	"github.com/blazejp83/napi/internal/media"
+	"github.com/blazejp83/napi/internal/osdb"
 )
 
 func syncCmd() *cobra.Command {

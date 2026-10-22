@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 version=${1:-$(git describe --tags --always 2>/dev/null || echo dev)}
-ld="-s -w -X github.com/blaze/napi/internal/app.Version=$version"
+ld="-s -w -X github.com/blazejp83/napi/internal/app.Version=$version"
 
 # Windows resources: icon, version info and manifest, as .syso files that
 # go build links in automatically. assets/napi.ico comes from tools/mkicon.

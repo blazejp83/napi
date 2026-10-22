@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/blaze/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/napi"
 )
 
 const (

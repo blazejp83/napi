@@ -11,8 +11,8 @@ import (
 
 	"golang.org/x/text/encoding/charmap"
 
-	"github.com/blaze/napi/internal/config"
-	"github.com/blaze/napi/internal/napi"
+	"github.com/blazejp83/napi/internal/config"
+	"github.com/blazejp83/napi/internal/napi"
 )
 
 // fakeAPI serves subtitles keyed by "hash/lang" and fails the first call for
