@@ -50,12 +50,14 @@ type ResultView struct {
 	Status string `json:"status"` // ok, synced, exists, not-found, error
 	Text   string `json:"text"`
 	Output string `json:"output"`
-	Page   string `json:"page"`
+	Page   string `json:"page"` // title to search for on napiprojekt.pl
 }
 
+// PageView is a recognised film whose versions can be searched for on
+// napiprojekt.pl.
 type PageView struct {
-	Name string `json:"name"`
-	URL  string `json:"url"`
+	Name  string `json:"name"`  // with year and episode, for the user
+	Title string `json:"title"` // what to search for
 }
 
 var stepText = map[batch.Step]string{
@@ -290,7 +292,7 @@ func singleMessage(r batch.Result) (string, string) {
 	case batch.NotFound:
 		if r.Movie != nil {
 			return "none", "Brak napisów do tej wersji. NapiProjekt zna film " + r.Movie.Name() +
-				" – kliknij napisy na jego stronie, a dopasuję je automatycznie."
+				" – wyszukam go na napiprojekt.pl; kliknij tam wybrane napisy, a dopasuję je automatycznie."
 		}
 		return "none", "Nie znaleziono napisów dla " + name + "."
 	}
@@ -332,11 +334,11 @@ func (a *App) finish(results []batch.Result, kind, msg, output string) {
 			v.Status = "synced"
 		}
 		if r.Status == batch.NotFound && r.Movie != nil {
-			v.Page = r.Movie.PageURL()
+			v.Page = r.Movie.Title
 			v.Text = "NapiProjekt zna film: " + r.Movie.Name()
 			if !seen[r.Movie.ID] {
 				seen[r.Movie.ID] = true
-				pages = append(pages, PageView{Name: r.Movie.Name(), URL: r.Movie.PageURL()})
+				pages = append(pages, PageView{Name: r.Movie.Name(), Title: r.Movie.Title})
 			}
 		}
 		views = append(views, v)

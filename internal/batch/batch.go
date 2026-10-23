@@ -592,17 +592,21 @@ func (r *Runner) SyncSubtitles(ctx context.Context, video string, content []byte
 }
 
 // plausibleLength rejects subtitles that cannot belong to the video, such as
-// another episode or a much longer cut: the last line must fall within the
-// video (allowing for a 25 vs 23.976 fps speed-up) and reach past its middle.
+// another episode or a much longer cut: the last lines must start within the
+// video (allowing for a 25 vs 23.976 fps speed-up) and past its middle.
 func plausibleLength(video string, cues []subs.Cue) error {
 	dur, err := media.Duration(video)
 	if err != nil || dur <= 0 || len(cues) == 0 {
 		return nil // unknown: let the sync decide
 	}
-	last := cues[len(cues)-1].End
-	for _, c := range cues {
-		last = max(last, c.End)
+	// Judge by start times, near the end but not the very last: a single
+	// mistyped timestamp must not reject an otherwise good file.
+	starts := make([]time.Duration, len(cues))
+	for i, c := range cues {
+		starts[i] = c.Start
 	}
+	sort.Slice(starts, func(i, j int) bool { return starts[i] < starts[j] })
+	last := starts[len(starts)-1-len(starts)/100]
 	if last > dur*106/100+90*time.Second || last < dur/2 {
 		return fmt.Errorf("length %s does not fit the video (%s)", clock(last), clock(dur))
 	}

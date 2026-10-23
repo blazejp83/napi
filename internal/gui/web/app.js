@@ -72,7 +72,7 @@ function render(s) {
     add("Anuluj", () => api().Cancel());
   } else {
     const pages = s.pages || [];
-    if (pages.length === 1) add("Otwórz stronę filmu", () => api().OpenURL(pages[0].url), true);
+    if (pages.length === 1) add("Szukaj na napiprojekt.pl", () => api().SearchNapi(pages[0].title), true);
     if (s.output) add("Pokaż plik", () => api().ShowFile(s.output), pages.length === 0);
     if ((s.results || []).length > 1) add(expanded ? "Zwiń" : "Szczegóły", toggleDetails, pages.length > 1);
     add("Zamknij", () => api().Close());
@@ -88,8 +88,8 @@ function renderResults(s) {
     const li = el("li", r.status);
     li.append(el("span", "dot"), el("span", "name", r.name));
     if (r.page) {
-      const a = el("a", "", "Strona filmu");
-      a.onclick = () => api().OpenURL(r.page);
+      const a = el("a", "", "Szukaj na napiprojekt.pl");
+      a.onclick = () => api().SearchNapi(r.page);
       li.append(a);
     } else if (r.output && (r.status === "ok" || r.status === "synced")) {
       const a = el("a", "", "Pokaż");

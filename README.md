@@ -34,7 +34,7 @@ Remove with the same switch or `napi menu uninstall`. Settings live in `%APPDATA
 | …the film already has subtitles in that language | Asks first: *Pobierz nowe* / *Zostaw*, or for a batch *Tylko brakujące* / *Wszystkie od nowa* |
 | *Pobierz napisy (eng)* | The same in English only; Polish files next to the film don't block it |
 | Right-click `.srt` files → *Synchronizuj napisy* | Finds each file's video (`Film.pol.srt` → `Film.mkv`), syncs it to the audio and saves it in place (old one as `.bak`) |
-| Nothing found, but NapiProjekt knows the film | The card offers *Otwórz stronę filmu*; clicking a version's `napiprojekt:` link there syncs it to your file |
+| Nothing found, but NapiProjekt knows the film | The card offers *Szukaj na napiprojekt.pl*: the site's search opens in your browser with the title filled in; pick the film → *napisy* → a version, and its `napiprojekt:` link syncs it to your file |
 | Start `napiw.exe` | Settings: languages, format, encoding, naming, OpenSubtitles login with a connection test, Explorer menu |
 
 Synced subtitles are always labelled as such (and machine translations as machine translations), because a different cut can still leave a scene off. Give them a quick look.
@@ -93,7 +93,11 @@ Exit code: `0` all videos have subtitles, `2` some weren't found, `1` errors. Th
    - **Finding the film:** NapiProjekt usually knows which film a file belongs to even without subtitles (`mode=2` returns title, year, IMDb ID, and series/season/episode). Failing that, Napi uses the IMDb ID from the hash search, or the title and year from the file name, matched against original and alternative titles, accents ignored.
    - **Ranking:** language, human over machine translation, release-name similarity (source, resolution, codec, group), frame rate, popularity.
    - **Checks and sync:** a candidate whose length doesn't fit the video is skipped. The rest is converted to SRT and synced with alass; up to three candidates are tried.
-4. **Nothing found but the film is known:** a link to its napiprojekt.pl page, where every version is listed. The API has no call that lists them, and the site is behind a Cloudflare challenge, so this step stays one click.
+4. **Nothing found but the film is known:** napiprojekt.pl's public search opens in your browser with the film's title. A small local page submits the search form; the film's list of versions is two clicks away and needs no login.
+   - **Why it's manual:** the API has no call that lists versions, and the site is behind a Cloudflare bot check that only a real browser passes.
+   - **No direct link:** the film page the API's ID leads to needs a login.
+
+**Broken timing** in downloaded subtitles is repaired: a line lasting longer than 30 s (a mistyped end time) is cut back to a normal reading time, and the length check uses start times, so one bad line can't reject a file.
 
 **Existing subtitles** are recognised per language from the name (`.pl`, `.pol`, `.polish`, `.en`, `.eng`…) or, for untagged files like `Film.srt`, from their text.
 

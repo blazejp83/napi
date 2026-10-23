@@ -162,8 +162,15 @@ func (a *App) Resize(height int) {
 	}
 }
 
-// OpenURL opens a page (a movie on napiprojekt.pl) in the default browser.
+// OpenURL opens a web page in the default browser.
 func (a *App) OpenURL(u string) { runtime.BrowserOpenURL(a.ctx, u) }
+
+// SearchNapi opens napiprojekt.pl's search for title in the default browser.
+// The search is a POST form, so a small local page submits it; the browser
+// then passes the site's bot check as for any visit.
+func (a *App) SearchNapi(title string) error {
+	return openSearchPage(title)
+}
 
 // ShowFile opens Explorer with the file selected.
 func (a *App) ShowFile(path string) error { return showInExplorer(path) }

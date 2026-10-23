@@ -261,15 +261,19 @@ func dedupe(s []string) []string {
 	return out
 }
 
-// fixTimes fills in missing or inverted end times: such a cue lasts a
-// length-based reading time, cut short where the next cue starts. Every cue
+// maxCue is the longest a line can plausibly stay on screen. Longer ones are
+// typos in the end time (00:44:50 --> 01:29:34) that would leave the text up
+// for minutes and throw off syncing.
+const maxCue = 30 * time.Second
+
+// fixTimes repairs end times: missing, inverted or absurdly long ones become
+// a length-based reading time, cut short where the next cue starts. Every cue
 // is shown for at least half a second.
 func fixTimes(cues []Cue) {
 	for i := range cues {
 		c := &cues[i]
-		maxDur := readingTime(c.Text)
-		if c.End <= c.Start {
-			c.End = c.Start + maxDur
+		if c.End <= c.Start || c.End-c.Start > maxCue {
+			c.End = c.Start + readingTime(c.Text)
 			if i+1 < len(cues) && cues[i+1].Start > c.Start && cues[i+1].Start < c.End {
 				c.End = cues[i+1].Start - time.Millisecond
 			}

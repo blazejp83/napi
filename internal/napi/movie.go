@@ -28,11 +28,12 @@ type Movie struct {
 
 var reIMDb = regexp.MustCompile(`tt(\d{5,9})`)
 
-// PageURL is the movie's page on napiprojekt.pl, which lists subtitles for
-// all its versions (the link format the official client opens).
-func (m *Movie) PageURL() string {
-	return "https://www.napiprojekt.pl/index.php?dz=16&film=" + url.QueryEscape(m.ID)
-}
+// SearchURL is napiprojekt.pl's public search: a POST form with the title in
+// "searchInp". Its results lead to each film's list of subtitle versions
+// (napisy1,1,1-dla-<id>-…), which needs no login. The site sits behind a
+// Cloudflare bot check, so only a real browser can open it; and the link the
+// API's movie ID gives (index.php?dz=16&film=<id>) requires logging in.
+const SearchURL = "https://www.napiprojekt.pl/napisy-szukaj"
 
 // Name is the title with the year, e.g. "4 miesiące, 3 tygodnie i 2 dni (2007)",
 // and the episode for series: "To jej wina (2025) S01E04".

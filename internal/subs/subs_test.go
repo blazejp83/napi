@@ -112,3 +112,19 @@ func TestDetectLanguage(t *testing.T) {
 		}
 	}
 }
+
+func TestBrokenEndTimes(t *testing.T) {
+	// From a real file: two cues whose end time was mistyped.
+	in := "1\r\n00:44:50,982 --> 01:29:34,999\r\nPierwsza\r\n\r\n2\r\n00:44:52,017 --> 00:44:53,018\r\nDruga\r\n\r\n" +
+		"3\r\n01:31:52,012 --> 02:53:54,017\r\nOstatnia\r\n\r\n"
+	cues, err := Parse(in, SubRip, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cues[0].End != 44*time.Minute+52*time.Second+16*time.Millisecond {
+		t.Errorf("first cue should end before the second starts, got %v", cues[0].End)
+	}
+	if d := cues[2].End - cues[2].Start; d > 6*time.Second {
+		t.Errorf("last cue lasts %v", d)
+	}
+}

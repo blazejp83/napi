@@ -51,7 +51,7 @@ func Message(r batch.Result) string {
 		return r.Err.Error()
 	}
 	if r.Movie != nil {
-		m := "napiprojekt: " + r.Movie.Name() + " " + r.Movie.PageURL()
+		m := "napiprojekt.pl knows " + r.Movie.Name() + ": search for \u201c" + r.Movie.Title + "\u201d at " + napi.SearchURL
 		if r.Warning != "" {
 			m += "; " + r.Warning
 		}
@@ -92,7 +92,7 @@ func Describe(r batch.Result) string {
 		return Message(r)
 	case batch.NotFound:
 		if r.Movie != nil {
-			s := "NapiProjekt knows this movie: " + r.Movie.Name() + ", other versions at " + r.Movie.PageURL()
+			s := "NapiProjekt knows this movie: " + r.Movie.Name() + "; other versions: search for \u201c" + r.Movie.Title + "\u201d at " + napi.SearchURL
 			if r.Warning != "" {
 				s += " ! " + r.Warning
 			}
