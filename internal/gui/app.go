@@ -21,6 +21,7 @@ import (
 
 	"github.com/blazejp83/napi/internal/app"
 	"github.com/blazejp83/napi/internal/config"
+	"github.com/blazejp83/napi/internal/winui"
 )
 
 //go:embed web
@@ -40,18 +41,25 @@ type App struct {
 	mode string // "panel" or "settings"
 	cfg  config.Config
 
-	job     func(ctx context.Context, a *App) // panel work, run once the page is ready
-	cancel  context.CancelFunc
 	mu      sync.Mutex
 	state   PanelState
 	started bool
 	answer  chan string // pending question on the card
+
+	// The job queue (queue.go): jobs run one at a time; poll brings in work
+	// from later menu launches while the card is open.
+	jobs      []*Job
+	nextID    int
+	wake      chan struct{}
+	jobCancel context.CancelFunc
+	poll      func() []winui.Group
 }
 
-// RunPanel shows the corner card and runs job, which reports through
-// a.setState. It returns when the card is closed.
-func RunPanel(cfg config.Config, job func(ctx context.Context, a *App)) error {
-	a := &App{mode: "panel", cfg: cfg, job: job}
+// RunPanel shows the corner card and works through the jobs for groups, then
+// any that poll returns while it is open. It returns when the card closes.
+func RunPanel(cfg config.Config, groups []winui.Group, poll func() []winui.Group) error {
+	a := &App{mode: "panel", cfg: cfg, poll: poll, wake: make(chan struct{}, 1)}
+	a.enqueue(groups)
 	return wails.Run(&options.App{
 		Title:            panelTitle,
 		Width:            panelWidth,
@@ -110,10 +118,12 @@ func (a *App) panelReady(ctx context.Context) {
 		return
 	}
 	a.started = true
-	jobCtx, cancel := context.WithCancel(ctx)
-	a.cancel = cancel
 	a.mu.Unlock()
-	go a.job(jobCtx, a)
+	a.publishJobs()
+	go a.runQueue(ctx)
+	if a.poll != nil {
+		go a.pollQueue(ctx)
+	}
 }
 
 // Mode tells the frontend which view to show.
@@ -138,16 +148,16 @@ func (a *App) setState(f func(s *PanelState)) {
 	runtime.EventsEmit(a.ctx, "state", s)
 }
 
-// Cancel stops the running job; the card then shows what was done.
+// Cancel stops the running job; queued jobs still run.
 func (a *App) Cancel() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.cancel != nil {
-		a.cancel()
+	if a.jobCancel != nil {
+		a.jobCancel()
 	}
 }
 
-// Close quits the app.
+// Close stops everything and quits.
 func (a *App) Close() {
 	a.Cancel()
 	runtime.Quit(a.ctx)
@@ -155,7 +165,7 @@ func (a *App) Close() {
 
 // Resize changes the card's height (CSS pixels) keeping it in the corner.
 func (a *App) Resize(height int) {
-	height = max(panelHeight, min(height, 560))
+	height = max(panelHeight, min(height, 640))
 	runtime.WindowSetSize(a.ctx, panelWidth, height)
 	if hwnd := findWindow(panelTitle); hwnd != 0 {
 		placeCorner(hwnd)

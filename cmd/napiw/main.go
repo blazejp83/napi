@@ -54,19 +54,19 @@ func main() {
 	}
 	if len(args) == 1 {
 		if hash, ok := app.NapiLinkHash(args[0]); ok {
-			fail(gui.RunPanel(cfg, gui.LinkJob(hash)))
-			return
+			mode, args = "link", []string{hash}
 		}
 	}
 
-	// Explorer starts one process per selected item. Each queues its paths;
-	// the process holding the lock shows one card for all of them, the rest
-	// exit. Paths queued while it runs are picked up after its current round.
+	// Every launch (Explorer starts one per selected item, a browser one per
+	// napiprojekt: link) queues its work; the process holding the lock shows
+	// one card and runs it all as a job queue, picking up launches that arrive
+	// while it is open. The others exit.
 	runtime.LockOSThread()
 	q := winui.NewQueue()
 	if args[0] != queueFlag {
 		if err := q.Add(lang, mode, args); err != nil {
-			fail(gui.RunPanel(cfg, gui.BatchJob([]winui.Group{{Lang: lang, Mode: mode, Paths: args}}, func() []winui.Group { return nil })))
+			fail(gui.RunPanel(cfg, []winui.Group{{Lang: lang, Mode: mode, Paths: args}}, nil))
 			return
 		}
 	}
@@ -76,7 +76,15 @@ func main() {
 	}
 	groups := q.Drain(400*time.Millisecond, 3*time.Second)
 	if len(groups) > 0 {
-		fail(gui.RunPanel(cfg, gui.BatchJob(groups, func() []winui.Group { return q.Drain(0, 0) })))
+		// A selection arrives as a burst of launches: wait for it to settle
+		// so it becomes one job.
+		poll := func() []winui.Group {
+			if !q.Pending() {
+				return nil
+			}
+			return q.Drain(400*time.Millisecond, 3*time.Second)
+		}
+		fail(gui.RunPanel(cfg, groups, poll))
 	}
 	lock.Unlock()
 	// A launch that queued after the last drain saw the lock held and exited;

@@ -77,8 +77,61 @@ function render(s) {
     if ((s.results || []).length > 1) add(expanded ? "Zwiń" : "Szczegóły", toggleDetails, pages.length > 1);
     add("Zamknij", () => api().Close());
   }
+  renderJobs(s);
   renderResults(s);
-  scheduleClose(s);
+  if (done) scheduleClose(s);
+  else stopClose();
+  fitCard();
+}
+
+const kindText = { get: "Pobierz napisy", sync: "Synchronizuj napisy", link: "Napisy z napiprojekt.pl" };
+
+// renderJobs lists the queue when there is more than one job.
+function renderJobs(s) {
+  const jobs = s.jobs || [];
+  const queued = jobs.filter((j) => j.status === "queued").length;
+  $("p-queued").textContent = queued ? `· w kolejce: ${queued}` : "";
+  const list = $("p-jobs");
+  list.replaceChildren();
+  list.hidden = jobs.length < 2;
+  for (const j of jobs) {
+    const li = el("li", j.status + (j.outcome ? " " + j.outcome : ""));
+    li.append(el("span", "ji"), el("span", "jl", j.label));
+    if (j.status === "queued") {
+      const b = el("button", "icon");
+      b.title = "Usuń z kolejki";
+      b.innerHTML = '<svg><use href="#i-close"/></svg>';
+      b.onclick = () => api().RemoveJob(j.id);
+      li.append(b);
+    } else li.append(el("span"));
+    let sub = kindText[j.kind] + (j.lang === "ENG" ? " (eng)" : "");
+    if (j.status === "queued") sub += " · w kolejce";
+    else if (j.status === "running") sub += " · trwa…";
+    else if (j.summary) sub += " · " + j.summary;
+    const why = el("span", "js", sub);
+    why.title = sub;
+    li.append(why);
+    list.append(li);
+  }
+}
+
+// fitCard resizes the window to the card's content: the bottom of the last
+// visible block plus the card's bottom padding (the card itself always fills
+// the window, so its own height can't be measured).
+let lastHeight = 0;
+function fitCard() {
+  requestAnimationFrame(() => {
+    let bottom = 0;
+    for (const c of $("panel").children) {
+      if (c.hidden || getComputedStyle(c).position === "absolute") continue;
+      bottom = Math.max(bottom, c.getBoundingClientRect().bottom);
+    }
+    const h = Math.ceil(bottom + 12);
+    if (h !== lastHeight) {
+      lastHeight = h;
+      api().Resize(h);
+    }
+  });
 }
 
 function renderResults(s) {
@@ -117,15 +170,6 @@ function files(n) {
 function toggleDetails() {
   expanded = !expanded;
   render(lastState);
-  if (!expanded) {
-    api().Resize(156);
-    return;
-  }
-  // Size the card to its content: everything above the list plus the list.
-  requestAnimationFrame(() => {
-    const list = $("p-results");
-    api().Resize(Math.ceil(list.offsetTop + list.scrollHeight + 14));
-  });
 }
 
 let closeLeft = 0;
@@ -145,6 +189,12 @@ function scheduleClose(s) {
       api().Close();
     }
   }, 100);
+}
+
+function stopClose() {
+  if (closeTimer) clearInterval(closeTimer);
+  closeTimer = null;
+  $("p-countdown").hidden = true;
 }
 
 function pauseClose(p) {

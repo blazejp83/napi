@@ -15,7 +15,6 @@ import (
 	"github.com/blazejp83/napi/internal/config"
 	"github.com/blazejp83/napi/internal/napi"
 	"github.com/blazejp83/napi/internal/pending"
-	"github.com/blazejp83/napi/internal/winui"
 )
 
 // PanelState is everything the corner card shows.
@@ -36,6 +35,7 @@ type PanelState struct {
 	Close   int          `json:"autoClose"` // seconds until the card closes itself, 0 = stays
 
 	Choices []Choice `json:"choices"` // phase "ask": buttons to answer with
+	Jobs    []Job    `json:"jobs"`    // the queue, in order
 }
 
 // Choice is one answer button of a question on the card.
@@ -70,56 +70,28 @@ var stepText = map[batch.Step]string{
 
 var langWords = map[string]string{"PL": "polskie", "ENG": "angielskie"}
 
-// BatchJob processes videos and folders from the Explorer menu. Each group
-// carries the language its menu entry asked for; more is polled after each
-// round for groups queued by later menu launches.
-func BatchJob(groups []winui.Group, more func() []winui.Group) func(ctx context.Context, a *App) {
-	return func(ctx context.Context, a *App) {
-		var all []batch.Result
-		for len(groups) > 0 && ctx.Err() == nil {
-			g := groups[0]
-			groups = groups[1:]
-			if g.Mode == "sync" {
-				all = append(all, a.syncRound(ctx, g.Paths, len(all))...)
-				if len(groups) == 0 && ctx.Err() == nil {
-					groups = more()
-				}
-				continue
-			}
-			cfg := a.cfg
-			if g.Lang != "" {
-				cfg.Languages = []string{g.Lang}
-			}
-			videos, err := batch.Collect(g.Paths, cfg)
-			if err != nil {
-				a.finishError(err.Error())
-				return
-			}
-			if !cfg.Overwrite {
-				switch a.askReplace(ctx, videos, cfg.Languages[0]) {
-				case "replace":
-					cfg.Overwrite = true
-				case "cancel":
-					videos = nil
-				}
-			}
-			if ctx.Err() != nil {
-				break
-			}
-			all = append(all, a.runRound(ctx, cfg, videos, len(all))...)
-			if len(groups) == 0 && ctx.Err() == nil {
-				groups = more()
-			}
-		}
-		if len(all) == 0 {
-			if ctx.Err() == nil {
-				a.Close() // nothing to do: the user kept the existing subtitles
-			}
-			return
-		}
-		app.Remember(all)
-		a.finishBatch(ctx, all)
+// getJob downloads subtitles for videos and folders from the Explorer menu.
+func (a *App) getJob(ctx context.Context, j *Job) jobResult {
+	cfg := a.cfg
+	if j.Lang != "" {
+		cfg.Languages = []string{j.Lang}
 	}
+	videos, err := batch.Collect(j.paths, cfg)
+	if err != nil {
+		return jobResult{kind: "error", msg: err.Error()}
+	}
+	if len(videos) == 0 {
+		return jobResult{kind: "none", msg: "Nie znaleziono plików wideo."}
+	}
+	if !cfg.Overwrite {
+		switch a.askReplace(ctx, videos, cfg.Languages[0]) {
+		case "replace":
+			cfg.Overwrite = true
+		case "cancel":
+			return jobResult{kind: "kept", msg: "Zostawiono istniejące napisy."}
+		}
+	}
+	return outcome(a.runRound(ctx, cfg, videos, 0))
 }
 
 func (a *App) runRound(ctx context.Context, cfg config.Config, videos []string, base int) []batch.Result {
@@ -231,9 +203,17 @@ func filesPL(n int) string {
 	return fmt.Sprintf("%d filmów", n)
 }
 
-func (a *App) finishBatch(ctx context.Context, results []batch.Result) {
+// jobResult is how a job ended.
+type jobResult struct {
+	results []batch.Result
+	kind    string // ok, partial, none, error, cancelled, kept (nothing done)
+	msg     string
+	output  string // the one file produced, for "Pokaż plik"
+}
+
+// outcome sums up a job's results.
+func outcome(results []batch.Result) jobResult {
 	s := batch.Summarize(results)
-	logPath := app.WriteRunLog(results)
 	cancelled := 0
 	for _, r := range results {
 		if errors.Is(r.Err, context.Canceled) {
@@ -243,7 +223,7 @@ func (a *App) finishBatch(ctx context.Context, results []batch.Result) {
 	kind, msg := "ok", ""
 	switch {
 	case cancelled > 0:
-		kind, msg = "cancelled", fmt.Sprintf("Przerwano. Pobrano %d z %d.", s.Downloaded, len(results))
+		kind, msg = "cancelled", fmt.Sprintf("Przerwano. Gotowe %d z %d.", s.Downloaded, len(results))
 	case len(results) == 1:
 		kind, msg = singleMessage(results[0])
 	case s.Failed > 0:
@@ -266,9 +246,7 @@ func (a *App) finishBatch(ctx context.Context, results []batch.Result) {
 	if len(results) == 1 && results[0].Output != "" {
 		output = results[0].Output
 	}
-	a.finish(results, kind, msg, output)
-	a.setState(func(st *PanelState) { st.Log = logPath })
-	a.autoClose(ctx, kind, results)
+	return jobResult{results: results, kind: kind, msg: msg, output: output}
 }
 
 func singleMessage(r batch.Result) (string, string) {
@@ -374,74 +352,56 @@ func (a *App) finishError(msg string) {
 	})
 }
 
-// autoClose closes the card after a clean success; anything that needs
-// attention stays until the user closes it.
-func (a *App) autoClose(ctx context.Context, kind string, results []batch.Result) {
-	if kind != "ok" {
-		return
+// linkJob downloads the subtitles behind a napiprojekt:<hash> link and syncs
+// them to the video waiting for them (or one the user picks).
+func (a *App) linkJob(ctx context.Context, j *Job) jobResult {
+	hash := j.paths[0]
+	a.setState(func(s *PanelState) {
+		s.Phase, s.Title, s.Detail, s.Busy, s.Total, s.Done, s.Choices = "running", "Pobieram napisy z NapiProjekt…", "napiprojekt:"+hash, true, 1, 0, nil
+	})
+	r := batch.NewRunner(a.cfg)
+	sub, err := app.DownloadNapiHash(ctx, r, hash)
+	if errors.Is(err, napi.ErrNotFound) {
+		return jobResult{kind: "error", msg: "NapiProjekt nie ma już napisów pod tym linkiem."}
 	}
-	for _, r := range results {
-		if r.Warning != "" || r.Source == batch.FromOSSynced || r.Source == batch.FromNapiOther || r.Source == batch.FromResync {
-			return // synced subtitles deserve a look at the message
+	if err != nil {
+		return jobResult{kind: "error", msg: "Nie udało się pobrać napisów z linku: " + err.Error()}
+	}
+	movie, _ := r.Movies.MovieInfo(ctx, hash)
+	if movie != nil {
+		a.relabel(j, movie.Name())
+	}
+	video := ""
+	matches := pending.Default().Match(movie)
+	if len(matches) == 1 {
+		video = matches[0].Video
+	} else {
+		dir, what := "", "tych napisów"
+		if len(matches) > 0 {
+			dir = filepath.Dir(matches[0].Video)
+		}
+		if movie != nil {
+			what = movie.Name()
+		}
+		a.setState(func(s *PanelState) { s.Title, s.Detail = "Wybierz plik filmu…", what })
+		if video = a.chooseVideo("Do którego pliku dopasować napisy: "+what+"?", dir); video == "" {
+			return jobResult{kind: "kept", msg: "Nie wybrano pliku."}
 		}
 	}
-	const secs = 6
-	a.setState(func(s *PanelState) { s.Close = secs })
-}
-
-// LinkJob downloads the subtitles behind a napiprojekt:<hash> link and syncs
-// them to the video waiting for them.
-func LinkJob(hash string) func(ctx context.Context, a *App) {
-	return func(ctx context.Context, a *App) {
-		a.setState(func(s *PanelState) {
-			s.Phase, s.Title, s.Detail, s.Busy, s.Total = "running", "Pobieram napisy z NapiProjekt…", "napiprojekt:"+hash, true, 1
-		})
-		r := batch.NewRunner(a.cfg)
-		sub, err := app.DownloadNapiHash(ctx, r, hash)
-		if errors.Is(err, napi.ErrNotFound) {
-			a.finishError("NapiProjekt nie ma już napisów pod tym linkiem.")
-			return
+	a.setState(func(s *PanelState) {
+		s.Title, s.Detail = stepText[batch.StepSync]+"…", filepath.Base(video)
+	})
+	start := time.Now()
+	res := r.SyncSubtitles(ctx, video, sub.Content, sub.Lang, batch.FromNapiOther, "napiprojekt:"+hash)
+	if res.Err != nil {
+		if errors.Is(res.Err, context.Canceled) {
+			return jobResult{kind: "cancelled", msg: "Przerwano dopasowywanie."}
 		}
-		if err != nil {
-			a.finishError("Nie udało się pobrać napisów z linku: " + err.Error())
-			return
-		}
-		movie, _ := r.Movies.MovieInfo(ctx, hash)
-		video := ""
-		matches := pending.Default().Match(movie)
-		if len(matches) == 1 {
-			video = matches[0].Video
-		} else {
-			dir, what := "", "tych napisów"
-			if len(matches) > 0 {
-				dir = filepath.Dir(matches[0].Video)
-			}
-			if movie != nil {
-				what = movie.Name()
-			}
-			a.setState(func(s *PanelState) { s.Title, s.Detail = "Wybierz plik filmu…", what })
-			if video = a.chooseVideo("Do którego pliku dopasować napisy: "+what+"?", dir); video == "" {
-				a.Close()
-				return
-			}
-		}
-		a.setState(func(s *PanelState) {
-			s.Title, s.Detail = stepText[batch.StepSync]+"…", filepath.Base(video)
-		})
-		start := time.Now()
-		res := r.SyncSubtitles(ctx, video, sub.Content, sub.Lang, batch.FromNapiOther, "napiprojekt:"+hash)
-		app.Remember([]batch.Result{res})
-		if res.Err != nil {
-			if errors.Is(res.Err, context.Canceled) {
-				a.finish(nil, "cancelled", "Przerwano dopasowywanie.", "")
-				return
-			}
-			a.finishError("Nie udało się dopasować napisów do " + filepath.Base(video) + ": " + res.Err.Error())
-			return
-		}
-		a.finish([]batch.Result{res}, "ok", fmt.Sprintf("Napisy z innej wersji dopasowane w %ds – sprawdź, czy pasują.",
-			int(time.Since(start).Seconds())), res.Output)
+		return jobResult{results: []batch.Result{res}, kind: "error",
+			msg: "Nie udało się dopasować napisów do " + filepath.Base(video) + ": " + res.Err.Error()}
 	}
+	return jobResult{results: []batch.Result{res}, kind: "ok", output: res.Output,
+		msg: fmt.Sprintf("Napisy z innej wersji dopasowane w %ds – sprawdź, czy pasują.", int(time.Since(start).Seconds()))}
 }
 
 // resultText is the one-line Polish explanation under a file in the list.

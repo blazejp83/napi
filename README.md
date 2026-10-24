@@ -9,7 +9,8 @@ Windows 10/11, two portable executables, no installer, no admin rights.
 ## Features
 
 - **Explorer menu:** right-click a video, a selection, a folder or a folder background → *Pobierz napisy* (your languages, Polish by default) or *Pobierz napisy (eng)*.
-- **Progress card** in the bottom-right corner: the current step and file, *Anuluj*, then the result with *Pokaż plik*, *Otwórz stronę filmu* and *Szczegóły*.
+- **Progress card** in the bottom-right corner: the current step and file, *Anuluj*, then the result with *Pokaż plik*, *Szukaj na napiprojekt.pl* and *Szczegóły*. It closes itself a few seconds after a clean success.
+- **Job queue:** start more downloads, syncs or `napiprojekt:` links while one is running; they queue in the same card, run one after another, and queued ones can be removed with ✕.
 - **Other releases, synced:** if nothing matches your exact file, Napi picks the best subtitles made for another release of the same film or episode and aligns them with [alass](https://github.com/kaegi/alass). It handles offsets, cuts and 25 vs 23.976 fps.
 - **Re-sync** existing `.srt`/`.sub` files: right-click → *Synchronizuj napisy*, one file or many.
 - **`napiprojekt:` links:** click a subtitle version on a film's napiprojekt.pl page and Napi downloads it and syncs it to the video that was waiting for it.
@@ -108,7 +109,7 @@ Exit code: `0` all videos have subtitles, `2` some weren't found, `1` errors. Th
 
 **Sync tool:** the first time a sync is needed, Napi downloads alass 2.0.0 for Windows (26 MB, includes ffmpeg, SHA-256 pinned) into `%LOCALAPPDATA%\napi\tools`; `alassPath` in `napi.json` points to your own. A sync reads the whole audio track: about 30–60 s for a feature film, longer from a network drive.
 
-**Multi-select:** Explorer starts one process per selected file. Each queues its path in `%TEMP%\napi-queue`; the one holding a named mutex runs them all in one card.
+**Multi-select and the job queue:** Explorer starts one process per selected file (a browser one per `napiprojekt:` link). Each drops its work into `%TEMP%\napi-queue` and exits, except the one holding a named mutex: it shows the card and keeps polling the spool while open. A burst of launches within 0.4 s (one selection) becomes one job; jobs run one at a time, because each sync reads a whole audio track. *Anuluj* cancels the running job only.
 
 **Interface:**
 - **Wails app:** `napiw.exe` is a [Wails](https://wails.io) v2 app with an embedded HTML/CSS/JS frontend (`internal/gui/web`, no npm build), rendered by WebView2.

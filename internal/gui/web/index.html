@@ -21,7 +21,7 @@
 <!-- Corner card -->
 <main id="panel" class="panel" hidden>
   <header class="bar" style="--wails-draggable:drag">
-    <span class="brand"><svg><use href="#i-logo-16"/></svg>Napi</span>
+    <span class="brand"><svg><use href="#i-logo-16"/></svg>Napi<span class="queued" id="p-queued"></span></span>
     <span class="tools">
       <button class="icon" id="p-settings" title="Ustawienia"><svg><use href="#i-gear"/></svg></button>
       <button class="icon" id="p-close" title="Zamknij"><svg><use href="#i-close"/></svg></button>
@@ -39,6 +39,7 @@
     <span class="count" id="p-count"></span>
     <span class="buttons" id="p-buttons"></span>
   </footer>
+  <ul class="jobs" id="p-jobs" hidden></ul>
   <ul class="results" id="p-results" hidden></ul>
   <div class="countdown" id="p-countdown" hidden><i></i></div>
 </main>
