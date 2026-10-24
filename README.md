@@ -107,6 +107,19 @@ Exit code: `0` all videos have subtitles, `2` some weren't found, `1` errors. Th
 - **Written:** SRT by default.
 - **MicroDVD frame rates** come from the file's own header, then the video's MKV/MP4/AVI header, then `ffprobe`, then `--fps`.
 
+**What subtitles are synced against:** text timing is far more reliable than sound, so before analysing the audio Napi looks for subtitles whose timing is known to match the video, in this order:
+1. **Subtitles already next to the video in another language,** including a release's `Subs\` folder (`Subs\4_English.srt`, or `Subs\<episode>\…`).
+2. **An exact NapiProjekt match in another language.**
+3. **A text subtitle track embedded in the video.**
+4. **The audio,** as the fallback. Speech detection fails on films where music and effects drown the dialogue, so audio-synced results are labelled "sprawdź, czy pasują".
+
+Excluded or adjusted:
+- **Never references:** files in the language being replaced, and subtitles Napi itself synced from audio.
+- **SDH lines are removed** from the reference first: `[Dramatic music plays]`, `(sighs)`, `♪ …`, speaker labels. Left in, they pull the alignment off.
+- **Choosing between several:** the one whose line count is closest wins.
+
+Napi keeps the pre-sync original of everything it synced (`%LOCALAPPDATA%\napi\originals`). Re-syncing such a file starts from the original, because alass can settle on a wrong but plausible alignment when it starts from badly synced timing. A file you edited since is re-synced as it is.
+
 **Sync tool:** the first time a sync is needed, Napi downloads alass 2.0.0 for Windows (26 MB, includes ffmpeg, SHA-256 pinned) into `%LOCALAPPDATA%\napi\tools`; `alassPath` in `napi.json` points to your own. A sync reads the whole audio track: about 30–60 s for a feature film, longer from a network drive.
 
 **Multi-select and the job queue:** Explorer starts one process per selected file (a browser one per `napiprojekt:` link). Each drops its work into `%TEMP%\napi-queue` and exits, except the one holding a named mutex: it shows the card and keeps polling the spool while open. A burst of launches within 0.4 s (one selection) becomes one job; jobs run one at a time, because each sync reads a whole audio track. *Anuluj* cancels the running job only.

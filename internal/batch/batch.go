@@ -71,6 +71,10 @@ type Result struct {
 	Source  Source
 	Release string // release the subtitles were made for, when synced
 	Machine bool   // OpenSubtitles marks the subtitles as machine-translated
+	// SyncRef is what synced subtitles were aligned to ("Subs\4_English.srt",
+	// "NapiProjekt", …); SyncAudio is set when that was the video's sound.
+	SyncRef   string
+	SyncAudio bool
 	// Movie is set for videos left without subtitles that NapiProjekt
 	// recognises: it likely has subtitles for other versions on its website.
 	Movie *napi.Movie
@@ -566,22 +570,46 @@ func (r *Runner) syncContent(ctx context.Context, video string, content []byte, 
 	if err := plausibleLength(video, cues); err != nil {
 		return err
 	}
+	r.step(video, StepSync)
+	synced, ref, err := r.syncTo(ctx, video, lang, cues, "")
+	if err != nil {
+		return err
+	}
+	res.Charset, res.Format, res.Lang = d.charset, d.format, lang
+	res.SyncRef, res.SyncAudio = ref.Label, ref.Audio()
+	res.Output = OutputPath(video, lang, ".srt", r.Config.Naming)
+	if err := r.writeSubs(video, lang, res.Output, subs.Encode(synced, r.Config.Encoding)); err != nil {
+		return err
+	}
+	noteSynced(res.Output, ref.Audio(), []byte(subs.WriteSRT(cues)))
+	return nil
+}
+
+// syncTo aligns cues to the best available reference (see findReference),
+// falling back to the audio if syncing against a subtitle file fails.
+func (r *Runner) syncTo(ctx context.Context, video, lang string, cues []subs.Cue, exclude string) (string, Reference, error) {
 	syncer, err := r.getSyncer(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: %v", errNoSyncer, err)
+		return "", Reference{}, fmt.Errorf("%w: %v", errNoSyncer, err)
 	}
-	r.step(video, StepSync)
-	synced, err := r.runSync(ctx, syncer, video, subs.WriteSRT(cues))
+	ref := r.findReference(ctx, video, "", lang, len(cues), exclude)
+	if ref.cleanup != nil {
+		defer ref.cleanup()
+	}
+	srt := subs.WriteSRT(cues)
+	synced, err := r.runSync(ctx, syncer, ref.Path, srt)
+	if err != nil && !ref.Audio() && ctx.Err() == nil {
+		ref = Reference{Path: video, Kind: "audio", Label: "dźwięk filmu"}
+		synced, err = r.runSync(ctx, syncer, video, srt)
+	}
 	if err != nil {
-		return fmt.Errorf("sync failed: %w", err)
+		return "", ref, fmt.Errorf("sync failed: %w", err)
 	}
 	// Re-render alass's output: it writes LF line endings.
 	if out, err := subs.Parse(synced, subs.SubRip, 0); err == nil {
 		synced = subs.WriteSRT(out)
 	}
-	res.Charset, res.Format, res.Lang = d.charset, d.format, lang
-	res.Output = OutputPath(video, lang, ".srt", r.Config.Naming)
-	return r.writeSubs(video, lang, res.Output, subs.Encode(synced, r.Config.Encoding))
+	return synced, ref, nil
 }
 
 // SyncSubtitles aligns subtitles obtained elsewhere (a napiprojekt: link,
@@ -1035,9 +1063,13 @@ func (r *Runner) syncFile(ctx context.Context, sub string) Result {
 		return r.finish(res, err)
 	}
 	res.Video = video
-	content, err := os.ReadFile(sub)
-	if err != nil {
-		return r.finish(res, err)
+	// A file napi synced before is re-synced from its pre-sync original:
+	// starting from badly synced timing can leave alass in a wrong alignment.
+	content, fromOriginal := originalOf(sub)
+	if !fromOriginal {
+		if content, err = os.ReadFile(sub); err != nil {
+			return r.finish(res, err)
+		}
 	}
 	d, cues, err := toCues(video, content, r.Config.DefaultFPS)
 	if err != nil {
@@ -1050,18 +1082,12 @@ func (r *Runner) syncFile(ctx context.Context, sub string) Result {
 		text, _ := subs.Decode(content)
 		res.Lang = subs.DetectLanguage(text)
 	}
-	syncer, err := r.getSyncer(ctx)
-	if err != nil {
-		return r.finish(res, fmt.Errorf("%w: %v", errNoSyncer, err))
-	}
 	r.step(video, StepSync)
-	synced, err := r.runSync(ctx, syncer, video, subs.WriteSRT(cues))
+	synced, ref, err := r.syncTo(ctx, video, res.Lang, cues, sub)
 	if err != nil {
-		return r.finish(res, fmt.Errorf("sync failed: %w", err))
+		return r.finish(res, err)
 	}
-	if out, err := subs.Parse(synced, subs.SubRip, 0); err == nil {
-		synced = subs.WriteSRT(out)
-	}
+	res.SyncRef, res.SyncAudio = ref.Label, ref.Audio()
 	res.Charset, res.Format, res.Release = d.charset, d.format, filepath.Base(sub)
 	res.Output = strings.TrimSuffix(sub, ext) + ".srt"
 	if _, err := os.Stat(res.Output); err == nil {
@@ -1070,7 +1096,11 @@ func (r *Runner) syncFile(ctx context.Context, sub string) Result {
 			return r.finish(res, fmt.Errorf("backing up %s: %w", filepath.Base(res.Output), err))
 		}
 	}
-	return r.finish(res, writeAtomic(res.Output, subs.Encode(synced, r.Config.Encoding)))
+	if err := writeAtomic(res.Output, subs.Encode(synced, r.Config.Encoding)); err != nil {
+		return r.finish(res, err)
+	}
+	noteSynced(res.Output, ref.Audio(), []byte(subs.WriteSRT(cues)))
+	return r.finish(res, nil)
 }
 
 // IsSubtitleFile reports whether path has a subtitle extension napi can sync.

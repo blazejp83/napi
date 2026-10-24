@@ -32,10 +32,12 @@ const (
 	linuxSHA     = "7bd0b9ae7e035d3ba940eacffb21243614df36231d47f21f0b4ce42001ab7fcd"
 )
 
-// Tools is a runnable alass with the environment it needs.
+// Tools is a runnable alass with the environment it needs, and the ffmpeg
+// and ffprobe it uses ("" when not available).
 type Tools struct {
-	Alass string
-	Env   []string
+	Alass           string
+	Env             []string
+	FFmpeg, FFprobe string
 }
 
 var (
@@ -80,7 +82,7 @@ func find(alassPath string) (*Tools, error) {
 		if _, err := os.Stat(alassPath); err != nil {
 			return nil, fmt.Errorf("alassPath: %w", err)
 		}
-		return &Tools{Alass: alassPath}, nil
+		return withPathFFmpeg(&Tools{Alass: alassPath}), nil
 	}
 	if dir, err := managedDir(); err == nil {
 		if t := managedTools(dir); t != nil {
@@ -89,7 +91,7 @@ func find(alassPath string) (*Tools, error) {
 	}
 	for _, name := range []string{"alass-cli", "alass"} {
 		if p, err := exec.LookPath(name); err == nil {
-			return &Tools{Alass: p}, nil
+			return withPathFFmpeg(&Tools{Alass: p}), nil
 		}
 	}
 	return nil, errors.New("alass not found")
@@ -103,16 +105,22 @@ func managedTools(dir string) *Tools {
 			return nil
 		}
 		ff := filepath.Join(root, "ffmpeg", "bin")
-		return &Tools{Alass: exe, Env: []string{
-			"ALASS_FFMPEG_PATH=" + filepath.Join(ff, "ffmpeg.exe"),
-			"ALASS_FFPROBE_PATH=" + filepath.Join(ff, "ffprobe.exe"),
-		}}
+		t := &Tools{Alass: exe, FFmpeg: filepath.Join(ff, "ffmpeg.exe"), FFprobe: filepath.Join(ff, "ffprobe.exe")}
+		t.Env = []string{"ALASS_FFMPEG_PATH=" + t.FFmpeg, "ALASS_FFPROBE_PATH=" + t.FFprobe}
+		return t
 	}
 	exe := filepath.Join(dir, "alass-linux64")
 	if _, err := os.Stat(exe); err != nil {
 		return nil
 	}
-	return &Tools{Alass: exe} // ffmpeg/ffprobe from PATH
+	return withPathFFmpeg(&Tools{Alass: exe})
+}
+
+// withPathFFmpeg fills in ffmpeg and ffprobe from PATH.
+func withPathFFmpeg(t *Tools) *Tools {
+	t.FFmpeg, _ = exec.LookPath("ffmpeg")
+	t.FFprobe, _ = exec.LookPath("ffprobe")
+	return t
 }
 
 func install(ctx context.Context) (*Tools, error) {
@@ -223,10 +231,12 @@ func unzip(data []byte, dest string) error {
 	return nil
 }
 
-// Sync aligns srt (SubRip text) to the video's audio and returns the
-// corrected SubRip text. It reads the whole audio track, so it takes a
-// while for long movies, longer on network drives.
-func (t *Tools) Sync(ctx context.Context, video, srt string) (string, error) {
+// Sync aligns srt (SubRip text) to ref and returns the corrected SubRip text.
+// ref is either a subtitle file whose timing matches the video (fast and
+// reliable: the lines are aligned to its lines) or the video itself, whose
+// audio is then analysed for speech (slow; unreliable on films where music
+// and effects drown the dialogue).
+func (t *Tools) Sync(ctx context.Context, ref, srt string) (string, error) {
 	dir, err := os.MkdirTemp("", "napi-sync-*")
 	if err != nil {
 		return "", err
@@ -238,7 +248,7 @@ func (t *Tools) Sync(ctx context.Context, video, srt string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, t.Alass, "--encoding-inc", "utf-8", video, in, out)
+	cmd := exec.CommandContext(ctx, t.Alass, "--encoding-inc", "utf-8", ref, in, out)
 	cmd.Env = append(os.Environ(), t.Env...)
 	proc.HideWindow(cmd)
 	var log bytes.Buffer
@@ -262,4 +272,63 @@ func lastLines(s string, n int) string {
 		}
 	}
 	return strings.Join(keep, " | ")
+}
+
+// textSubtitleCodecs are embedded subtitle formats ffmpeg can turn into SRT
+// (bitmap ones like PGS or VobSub cannot be).
+var textSubtitleCodecs = map[string]bool{"subrip": true, "ass": true, "ssa": true, "mov_text": true, "webvtt": true, "text": true}
+
+// Track is an embedded subtitle track.
+type Track struct {
+	Index int    // stream index in the file
+	Lang  string // ISO 639-2 tag, "" if none
+}
+
+// TextTracks lists the embedded text subtitle tracks of a video.
+func (t *Tools) TextTracks(ctx context.Context, video string) ([]Track, error) {
+	if t.FFprobe == "" {
+		return nil, errors.New("ffprobe not available")
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, t.FFprobe, "-v", "error", "-select_streams", "s",
+		"-show_entries", "stream=index,codec_name:stream_tags=language", "-of", "csv=p=0", video)
+	proc.HideWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var tracks []Track
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Split(strings.TrimSpace(line), ",")
+		if len(f) < 2 || !textSubtitleCodecs[f[1]] {
+			continue
+		}
+		var tr Track
+		fmt.Sscanf(f[0], "%d", &tr.Index)
+		if len(f) > 2 {
+			tr.Lang = strings.ToLower(f[2])
+		}
+		tracks = append(tracks, tr)
+	}
+	return tracks, nil
+}
+
+// ExtractTrack writes an embedded text subtitle track to out as SRT. It reads
+// through the whole file, like an audio sync.
+func (t *Tools) ExtractTrack(ctx context.Context, video string, track Track, out string) error {
+	if t.FFmpeg == "" {
+		return errors.New("ffmpeg not available")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, t.FFmpeg, "-v", "error", "-y", "-i", video,
+		"-map", fmt.Sprintf("0:%d", track.Index), "-c:s", "srt", out)
+	proc.HideWindow(cmd)
+	var log bytes.Buffer
+	cmd.Stderr = &log
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("ffmpeg: %v: %s", err, lastLines(log.String(), 2))
+	}
+	return nil
 }

@@ -82,6 +82,13 @@ func Describe(r batch.Result) string {
 		if r.Machine {
 			s += " (machine translation)"
 		}
+		if r.SyncRef != "" {
+			if r.SyncAudio {
+				s += " (synced to the audio)"
+			} else {
+				s += " (synced to " + r.SyncRef + ")"
+			}
+		}
 		if r.Warning != "" {
 			s += " ! " + r.Warning
 		}

@@ -189,6 +189,11 @@ func resync(cmd *cobra.Command, cfg config.Config, args []string) error {
 	fmt.Fprintln(os.Stderr, "syncing (each file reads its video's whole audio track)...")
 	r.Progress = func(done, total int, res batch.Result) {
 		msg := "-> " + filepath.Base(res.Output)
+		if res.SyncAudio {
+			msg += " (synced to the audio)"
+		} else if res.SyncRef != "" {
+			msg += " (synced to " + res.SyncRef + ")"
+		}
 		if res.Err != nil {
 			msg = res.Err.Error()
 		}

@@ -128,3 +128,21 @@ func TestBrokenEndTimes(t *testing.T) {
 		t.Errorf("last cue lasts %v", d)
 	}
 }
+
+func TestStripSDH(t *testing.T) {
+	in := []Cue{
+		{0, time.Second, "[Dramatic music plays]"},
+		{time.Second, 2 * time.Second, "JOEL: Start the car!"},
+		{2 * time.Second, 3 * time.Second, "<i>(sighs)</i> We're safe now."},
+		{3 * time.Second, 4 * time.Second, "♪ la la la ♪"},
+		{4 * time.Second, 5 * time.Second, "- Man: Need a ride?\n- [Door slams]"},
+	}
+	got := StripSDH(in)
+	var texts []string
+	for _, c := range got {
+		texts = append(texts, c.Text)
+	}
+	if want := "Start the car!|We're safe now.|Need a ride?"; strings.Join(texts, "|") != want {
+		t.Fatalf("got %q, want %q", strings.Join(texts, "|"), want)
+	}
+}

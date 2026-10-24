@@ -255,12 +255,12 @@ func singleMessage(r batch.Result) (string, string) {
 	case batch.Downloaded:
 		switch r.Source {
 		case batch.FromResync:
-			return "ok", "Napisy " + filepath.Base(r.Output) + " zsynchronizowane z dźwiękiem filmu. Poprzednie są w kopii .bak."
+			return "ok", "Napisy " + filepath.Base(r.Output) + " " + syncedHow(r) + ". Poprzednie są w kopii .bak."
 		case batch.FromOSSynced, batch.FromNapiOther:
 			if r.Machine {
-				return "ok", "Jedyne dostępne napisy: tłumaczenie maszynowe z innej wersji, zsynchronizowane – sprawdź, czy pasują."
+				return "ok", "Jedyne dostępne napisy: tłumaczenie maszynowe z innej wersji, " + syncedHow(r) + "."
 			}
-			return "ok", "Napisy z innej wersji, zsynchronizowane – sprawdź, czy pasują."
+			return "ok", "Napisy z innej wersji, " + syncedHow(r) + "."
 		case batch.FromOS:
 			return "ok", "Pobrano napisy z OpenSubtitles (" + r.Lang + ")."
 		}
@@ -401,7 +401,16 @@ func (a *App) linkJob(ctx context.Context, j *Job) jobResult {
 			msg: "Nie udało się dopasować napisów do " + filepath.Base(video) + ": " + res.Err.Error()}
 	}
 	return jobResult{results: []batch.Result{res}, kind: "ok", output: res.Output,
-		msg: fmt.Sprintf("Napisy z innej wersji dopasowane w %ds – sprawdź, czy pasują.", int(time.Since(start).Seconds()))}
+		msg: fmt.Sprintf("Napisy z innej wersji %s (%ds).", syncedHow(res), int(time.Since(start).Seconds()))}
+}
+
+// syncedHow says what synced subtitles were aligned to: other subtitles of
+// the video (reliable) or its sound (worth a check).
+func syncedHow(r batch.Result) string {
+	if r.SyncAudio || r.SyncRef == "" {
+		return "zsynchronizowane z dźwiękiem filmu – sprawdź, czy pasują"
+	}
+	return "zsynchronizowane według: " + r.SyncRef
 }
 
 // resultText is the one-line Polish explanation under a file in the list.
@@ -413,13 +422,13 @@ func resultText(r batch.Result) string {
 			return "Pobrano z OpenSubtitles (" + r.Lang + ")"
 		case batch.FromOSSynced:
 			if r.Machine {
-				return "Tłumaczenie maszynowe z innej wersji (" + r.Release + "), zsynchronizowane"
+				return "Tłumaczenie maszynowe z innej wersji (" + r.Release + "), " + syncedHow(r)
 			}
-			return "Z innej wersji (" + r.Release + "), zsynchronizowane"
+			return "Z innej wersji (" + r.Release + "), " + syncedHow(r)
 		case batch.FromNapiOther:
-			return "Z innej wersji z NapiProjekt, zsynchronizowane"
+			return "Z innej wersji z NapiProjekt, " + syncedHow(r)
 		case batch.FromResync:
-			return "Zsynchronizowano: " + filepath.Base(r.Output)
+			return filepath.Base(r.Output) + ": " + syncedHow(r)
 		}
 		return "Pobrano z NapiProjekt (" + r.Lang + ")"
 	case batch.Skipped:
